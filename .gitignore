@@ -7,3 +7,4 @@ build
 coverage
 logs
 *.log
+.pgdata
