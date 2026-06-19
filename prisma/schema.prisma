@@ -1,0 +1,128 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Admin {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  name         String   @default("Admin")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Program {
+  id                 String    @id @default(uuid())
+  appCode            String    @unique
+  name               String
+  description        String?
+  defaultLicenseDays Int       @default(365)
+  defaultMaxDevices  Int       @default(1)
+  isActive           Boolean   @default(true)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  licenses           License[]
+}
+
+model Customer {
+  id          String    @id @default(uuid())
+  name        String
+  email       String
+  phone       String?
+  companyName String?
+  notes       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  licenses    License[]
+}
+
+enum LicenseSource {
+  MANUAL
+  WEBSITE_ORDER
+  API
+}
+
+enum LicenseStatus {
+  ACTIVE
+  PASSIVE
+  EXPIRED
+}
+
+model License {
+  id                     String          @id @default(uuid())
+  licenseKey             String          @unique
+  activationPasswordHash String
+  customerId             String
+  programId              String
+  source                 LicenseSource   @default(MANUAL)
+  startsAt               DateTime
+  expiresAt              DateTime
+  maxDevices             Int             @default(1)
+  status                 LicenseStatus   @default(ACTIVE)
+  notes                  String?
+  createdAt              DateTime        @default(now())
+  updatedAt              DateTime        @updatedAt
+  customer               Customer        @relation(fields: [customerId], references: [id])
+  program                Program         @relation(fields: [programId], references: [id])
+  devices                LicenseDevice[]
+  events                 LicenseEvent[]
+
+  @@index([customerId])
+  @@index([programId])
+  @@index([status])
+  @@index([expiresAt])
+}
+
+enum DeviceStatus {
+  ACTIVE
+  REVOKED
+}
+
+model LicenseDevice {
+  id               String       @id @default(uuid())
+  licenseId        String
+  deviceHash       String
+  deviceName       String?
+  platform         String?
+  appVersion       String?
+  firstActivatedAt DateTime     @default(now())
+  lastValidatedAt  DateTime     @default(now())
+  status           DeviceStatus @default(ACTIVE)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  license          License      @relation(fields: [licenseId], references: [id], onDelete: Cascade)
+
+  @@unique([licenseId, deviceHash])
+  @@index([licenseId])
+}
+
+enum LicenseEventType {
+  LICENSE_CREATED
+  LICENSE_EXTENDED
+  LICENSE_DISABLED
+  LICENSE_ENABLED
+  ACTIVATED
+  VALIDATED
+  DEVICE_RESET
+  PASSWORD_REGENERATED
+  MAIL_SENT
+  VALIDATION_FAILED
+}
+
+model LicenseEvent {
+  id        String           @id @default(uuid())
+  licenseId String
+  eventType LicenseEventType
+  message   String?
+  ipAddress String?
+  createdAt DateTime         @default(now())
+  license   License          @relation(fields: [licenseId], references: [id], onDelete: Cascade)
+
+  @@index([licenseId])
+  @@index([createdAt])
+}

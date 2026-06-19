@@ -1,0 +1,22 @@
+2026-06-19 14:59:10.980 +03 [5116] LOG:  starting PostgreSQL 18.4 on x86_64-windows, compiled by msvc-19.44.35226, 64-bit
+2026-06-19 14:59:10.986 +03 [5116] LOG:  listening on IPv6 address "::1", port 5432
+2026-06-19 14:59:10.986 +03 [5116] LOG:  listening on IPv4 address "127.0.0.1", port 5432
+2026-06-19 14:59:11.051 +03 [16216] LOG:  database system was shut down at 2026-06-19 14:58:46 +03
+2026-06-19 14:59:11.062 +03 [5116] LOG:  database system is ready to accept connections
+2026-06-19 15:00:24.640 +03 [13860] FATAL:  role "Woontegra" does not exist
+2026-06-19 15:04:11.047 +03 [25900] LOG:  checkpoint starting: time
+2026-06-19 15:05:29.956 +03 [26668] FATAL:  role "Woontegra" does not exist
+2026-06-19 15:06:09.196 +03 [25900] LOG:  checkpoint complete: wrote 1096 buffers (6.7%), wrote 3 SLRU buffers; 1 WAL file(s) added, 0 removed, 0 recycled; write=117.887 s, sync=0.145 s, total=118.149 s; sync files=347, longest=0.003 s, average=0.001 s; distance=5267 kB, estimate=5267 kB; lsn=0/1D15FB8, redo lsn=0/1D15F28
+2026-06-19 15:09:11.227 +03 [25900] LOG:  checkpoint starting: time
+2026-06-19 15:09:13.292 +03 [25900] LOG:  checkpoint complete: wrote 19 buffers (0.1%), wrote 1 SLRU buffers; 0 WAL file(s) added, 0 removed, 0 recycled; write=2.045 s, sync=0.011 s, total=2.066 s; sync files=20, longest=0.003 s, average=0.001 s; distance=15 kB, estimate=4742 kB; lsn=0/1D19C10, redo lsn=0/1D19BB8
+2026-06-19 15:14:11.298 +03 [25900] LOG:  checkpoint starting: time
+2026-06-19 15:14:11.418 +03 [25900] LOG:  checkpoint complete: wrote 1 buffers (0.0%), wrote 0 SLRU buffers; 0 WAL file(s) added, 0 removed, 0 recycled; write=0.105 s, sync=0.005 s, total=0.121 s; sync files=1, longest=0.005 s, average=0.005 s; distance=2 kB, estimate=4268 kB; lsn=0/1D1A5C8, redo lsn=0/1D1A570
+2026-06-19 15:19:11.426 +03 [25900] LOG:  checkpoint starting: time
+2026-06-19 15:19:13.422 +03 [25900] LOG:  checkpoint complete: wrote 18 buffers (0.1%), wrote 1 SLRU buffers; 0 WAL file(s) added, 0 removed, 0 recycled; write=1.973 s, sync=0.014 s, total=1.996 s; sync files=19, longest=0.005 s, average=0.001 s; distance=18 kB, estimate=3843 kB; lsn=0/1D1EE68, redo lsn=0/1D1EE10
+2026-06-19 15:49:11.470 +03 [25900] LOG:  checkpoint starting: time
+2026-06-19 15:49:13.133 +03 [25900] LOG:  checkpoint complete: wrote 15 buffers (0.1%), wrote 1 SLRU buffers; 0 WAL file(s) added, 0 removed, 0 recycled; write=1.638 s, sync=0.014 s, total=1.663 s; sync files=16, longest=0.006 s, average=0.001 s; distance=16 kB, estimate=3460 kB; lsn=0/1D230C0, redo lsn=0/1D23068
+2026-06-19 15:50:36.604 +03 [2008] LOG:  could not receive data from client: unrecognized winsock error 10054
+2026-06-19 15:50:36.604 +03 [15640] LOG:  could not receive data from client: unrecognized winsock error 10054
+2026-06-19 15:50:36.604 +03 [22824] LOG:  could not receive data from client: unrecognized winsock error 10054
+2026-06-19 15:50:36.604 +03 [12164] LOG:  could not receive data from client: unrecognized winsock error 10054
+2026-06-19 15:50:36.605 +03 [11708] LOG:  could not receive data from client: unrecognized winsock error 10054
