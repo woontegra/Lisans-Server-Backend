@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { hashPassword } from '../src/utils/password';
+import { hashPassword } from './utils/password';
 
 const prisma = new PrismaClient();
 
@@ -42,14 +42,18 @@ const DEFAULT_PROGRAMS = [
 ];
 
 async function main() {
-  const adminEmail = process.env.ADMIN_EMAIL || 'admin@woontegra.com';
-  const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
+  const adminEmail = process.env.ADMIN_EMAIL;
+  const adminPassword = process.env.ADMIN_PASSWORD;
+
+  if (!adminEmail || !adminPassword) {
+    throw new Error('ADMIN_EMAIL ve ADMIN_PASSWORD ortam değişkenleri gerekli');
+  }
 
   const passwordHash = await hashPassword(adminPassword);
 
   await prisma.admin.upsert({
     where: { email: adminEmail },
-    update: { passwordHash },
+    update: { passwordHash, name: 'Woontegra Admin' },
     create: {
       email: adminEmail,
       passwordHash,

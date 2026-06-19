@@ -41,24 +41,7 @@ git commit -m "Add Prisma migrations and Railway deploy scripts"
 git push origin main
 ```
 
-### 3) Railway Postgres’e şemayı yükle (bilgisayarınızdan, bir kez)
-
-PowerShell’de Railway URL’yi geçici olarak verin (`.env` dosyasını değiştirmeyin de olur):
-
-```powershell
-cd C:\Users\Woontegra\Desktop\Woontegra-Lisans-Server\backend
-
-$env:DATABASE_URL="BURAYA_RAILWAY_DATABASE_URL_YAPIŞTIR"
-
-npx prisma migrate deploy
-npm run seed
-```
-
-Başarılı çıktı:
-- `Applying migration 20260619120000_init` veya `No pending migrations`
-- Seed: `Admin kullanıcı hazır`, `Program hazır: MUVEKKIL_KASA_DESKTOP` ...
-
-### 4) Railway Backend servisi
+### 3) Railway Backend servisi
 
 **+ New** → **GitHub Repo** → `woontegra/Lisans-Server-Backend`
 
@@ -73,16 +56,18 @@ npm install && npm run build
 ```
 npm start
 ```
-(`start` = `prisma migrate deploy` + `node dist/index.js`)
+(`start` = `prisma migrate deploy` → `npm run seed` → `node dist/index.js`)
 
-### 5) Railway Variables (Backend servisi)
+Seed her deploy’da otomatik çalışır; admin ve programlar upsert ile idempotent güncellenir. Manuel PC seed gerekmez.
+
+### 4) Railway Variables (Backend servisi)
 
 | Değişken | Değer |
 |----------|--------|
 | `DATABASE_URL` | Postgres servisinden **Reference** ile bağla veya Public URL |
 | `JWT_SECRET` | Güçlü rastgele string (min 32 karakter) |
-| `ADMIN_EMAIL` | admin@woontegra.com |
-| `ADMIN_PASSWORD` | Güçlü şifre (seed bir kez çalıştıysa değişmez) |
+| `ADMIN_EMAIL` | info@woontegra.com |
+| `ADMIN_PASSWORD` | Railway’de güçlü şifre (repo’ya yazmayın) |
 | `INTEGRATION_SECRET` | Website ile aynı olacak gizli anahtar |
 | `PORT` | Railway otomatik verir; genelde tanımlamayın |
 | `NODE_ENV` | production |
@@ -91,8 +76,16 @@ SMTP (isteğe bağlı): `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `MAI
 
 Deploy sonrası test:
 ```
-https://SIZIN-BACKEND.up.railway.app/health
+https://lisans-server-backend-production.up.railway.app/health
 ```
+
+### 5) Vercel Frontend (admin panel)
+
+| Değişken | Değer |
+|----------|--------|
+| `VITE_API_URL` | `https://lisans-server-backend-production.up.railway.app` |
+
+Login istekleri Vercel’e değil, Railway backend’e gider.
 
 ---
 

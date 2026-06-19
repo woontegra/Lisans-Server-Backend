@@ -20,3 +20,7 @@
 2026-06-19 15:50:36.604 +03 [22824] LOG:  could not receive data from client: unrecognized winsock error 10054
 2026-06-19 15:50:36.604 +03 [12164] LOG:  could not receive data from client: unrecognized winsock error 10054
 2026-06-19 15:50:36.605 +03 [11708] LOG:  could not receive data from client: unrecognized winsock error 10054
+2026-06-19 16:57:44.427 +03 [13872] ERROR:  relation "_prisma_migrations" does not exist at character 126
+2026-06-19 16:57:44.427 +03 [13872] STATEMENT:  SELECT "id", "checksum", "finished_at", "migration_name", "logs", "rolled_back_at", "started_at", "applied_steps_count" FROM "_prisma_migrations" ORDER BY "started_at" ASC
+2026-06-19 16:59:11.239 +03 [25900] LOG:  checkpoint starting: time
+2026-06-19 16:59:15.161 +03 [25900] LOG:  checkpoint complete: wrote 36 buffers (0.2%), wrote 1 SLRU buffers; 0 WAL file(s) added, 0 removed, 0 recycled; write=3.889 s, sync=0.021 s, total=3.922 s; sync files=32, longest=0.005 s, average=0.001 s; distance=174 kB, estimate=3131 kB; lsn=0/1D4ECA8, redo lsn=0/1D4EC50
