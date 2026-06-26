@@ -55,7 +55,7 @@ router.post(
         licenseDays: licenseDays ?? program.defaultLicenseDays,
         maxDevices: maxDevices ?? program.defaultMaxDevices,
         notes: `Website sipariş no: ${orderNo}`,
-        sendMail: true,
+        sendMail: false,
         downloadUrl,
         ipAddress: getClientIp(req),
       });
@@ -64,9 +64,9 @@ router.post(
         success: true,
         orderNo,
         licenseKey: result.license.licenseKey,
+        activationPassword: result.activationPassword,
+        programName: program.name,
         expiresAt: result.license.expiresAt,
-        mailSent: result.mailResult?.sent ?? false,
-        mailError: result.mailResult?.error,
       });
     } catch (err) {
       console.error('Website order error:', err);

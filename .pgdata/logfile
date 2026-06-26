@@ -24,3 +24,9 @@
 2026-06-19 16:57:44.427 +03 [13872] STATEMENT:  SELECT "id", "checksum", "finished_at", "migration_name", "logs", "rolled_back_at", "started_at", "applied_steps_count" FROM "_prisma_migrations" ORDER BY "started_at" ASC
 2026-06-19 16:59:11.239 +03 [25900] LOG:  checkpoint starting: time
 2026-06-19 16:59:15.161 +03 [25900] LOG:  checkpoint complete: wrote 36 buffers (0.2%), wrote 1 SLRU buffers; 0 WAL file(s) added, 0 removed, 0 recycled; write=3.889 s, sync=0.021 s, total=3.922 s; sync files=32, longest=0.005 s, average=0.001 s; distance=174 kB, estimate=3131 kB; lsn=0/1D4ECA8, redo lsn=0/1D4EC50
+2026-06-19 19:37:51.658 +03 [5116] LOG:  could not reserve shared memory region (addr=0000027373D10000) for child 0000000000001674: error code 487
+2026-06-19 23:04:01.338 +03 [5116] LOG:  autovacuum worker (PID 6628) was terminated by exception 0xC000026B
+2026-06-19 23:04:01.338 +03 [5116] HINT:  See C include file "ntstatus.h" for a description of the hexadecimal value.
+2026-06-19 23:04:01.339 +03 [5116] LOG:  terminating any other active server processes
+2026-06-19 23:04:01.370 +03 [5116] LOG:  all server processes terminated; reinitializing
+2026-06-19 23:04:04.433 +03 [5116] LOG:  could not reserve shared memory region (addr=0000027376510000) for child 0000000000001304: error code 487
