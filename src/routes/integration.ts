@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { LicenseSource } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { integrationAuthMiddleware, getClientIp } from '../middleware/auth';
-import { createLicense } from '../services/licenseService';
+import { createLicense, regenerateActivationPassword } from '../services/licenseService';
 
 const router = Router();
 
@@ -20,6 +20,7 @@ router.post(
         downloadUrl,
         licenseDays,
         maxDevices,
+        resendCredentials,
       } = req.body;
 
       if (!customerName || !customerEmail || !appCode || !orderNo) {
@@ -45,6 +46,33 @@ router.post(
             phone: customerPhone,
             notes: `Website siparişi: ${orderNo}`,
           },
+        });
+      }
+
+      const noteMarker = `Website sipariş no: ${orderNo}`;
+      const existing = await prisma.license.findFirst({
+        where: { notes: noteMarker, source: LicenseSource.WEBSITE_ORDER },
+        include: { program: true },
+      });
+
+      if (existing) {
+        if (resendCredentials === true) {
+          const activationPassword = await regenerateActivationPassword(existing.id, getClientIp(req));
+          return res.status(200).json({
+            success: true,
+            alreadyExists: true,
+            orderNo,
+            licenseKey: existing.licenseKey,
+            activationPassword,
+            programName: existing.program.name,
+            expiresAt: existing.expiresAt,
+          });
+        }
+        return res.status(409).json({
+          error: 'Bu sipariş için lisans zaten oluşturulmuş',
+          alreadyExists: true,
+          orderNo,
+          licenseKey: existing.licenseKey,
         });
       }
 
