@@ -21,6 +21,8 @@ export const config = {
   offlineGraceDays: 7,
 };
 
+export { getSaasProviderConfig, SAAS_PROVISIONING_NOT_IMPLEMENTED } from './saasProviders';
+
 export function isSmtpConfigured(): boolean {
   return !!(config.smtp.host && config.smtp.user && config.smtp.pass);
 }

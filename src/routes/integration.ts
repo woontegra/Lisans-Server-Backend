@@ -1,8 +1,10 @@
 import { Router, Request, Response } from 'express';
-import { LicenseSource } from '@prisma/client';
+import { LicenseSource, ProgramProductType } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { integrationAuthMiddleware, getClientIp } from '../middleware/auth';
 import { createLicense, regenerateActivationPassword } from '../services/licenseService';
+import { handleSaasWebsiteOrder, isDesktopProgram } from '../services/saasOrderService';
+import { parseProductType, toProgramDto, validateSaasProgramFields } from '../utils/programDto';
 
 const router = Router();
 
@@ -14,22 +16,49 @@ function normalizeAppCode(raw: unknown): string {
     .toUpperCase();
 }
 
-function toProgramDto(program: {
-  appCode: string;
-  name: string;
-  isActive: boolean;
-  defaultLicenseDays: number;
-  defaultMaxDevices: number;
-  description?: string | null;
-}) {
-  return {
-    appCode: program.appCode,
-    name: program.name,
-    isActive: program.isActive,
-    defaultLicenseDays: program.defaultLicenseDays,
-    defaultMaxDevices: program.defaultMaxDevices,
-    description: program.description ?? null,
-  };
+async function resolveOrCreateCustomer(
+  customerName: string,
+  customerEmail: string,
+  customerPhone: string | null | undefined,
+  orderNo: string
+) {
+  const normalizedEmail = String(customerEmail).trim().toLowerCase();
+  const normalizedName = String(customerName).trim();
+  const normalizedPhone = customerPhone?.trim() || null;
+
+  let customer = await prisma.customer.findFirst({
+    where: { email: { equals: normalizedEmail, mode: 'insensitive' } },
+  });
+
+  if (!customer) {
+    customer = await prisma.customer.create({
+      data: {
+        name: normalizedName,
+        email: normalizedEmail,
+        phone: normalizedPhone,
+        notes: `Website siparişi: ${orderNo}`,
+      },
+    });
+  } else {
+    const updates: { name?: string; phone?: string | null; email?: string } = {};
+    if (normalizedName && customer.name !== normalizedName) {
+      updates.name = normalizedName;
+    }
+    if (normalizedPhone && customer.phone !== normalizedPhone) {
+      updates.phone = normalizedPhone;
+    }
+    if (customer.email !== normalizedEmail) {
+      updates.email = normalizedEmail;
+    }
+    if (Object.keys(updates).length > 0) {
+      customer = await prisma.customer.update({
+        where: { id: customer.id },
+        data: updates,
+      });
+    }
+  }
+
+  return customer;
 }
 
 router.get('/programs', integrationAuthMiddleware, async (req: Request, res: Response) => {
@@ -77,6 +106,9 @@ router.post('/programs', integrationAuthMiddleware, async (req: Request, res: Re
         ? Math.min(50, Math.floor(req.body.defaultMaxDevices))
         : 1;
     const isActive = req.body?.isActive !== false;
+    const productType = parseProductType(req.body?.productType);
+    const targetService = req.body?.targetService ? String(req.body.targetService).trim() : null;
+    const saasProductCode = req.body?.saasProductCode ? String(req.body.saasProductCode).trim() : null;
 
     if (!appCode || !APP_CODE_PATTERN.test(appCode)) {
       return res.status(400).json({
@@ -85,6 +117,11 @@ router.post('/programs', integrationAuthMiddleware, async (req: Request, res: Re
     }
     if (!name) {
       return res.status(400).json({ error: 'Program adı zorunludur' });
+    }
+
+    const saasValidation = validateSaasProgramFields(productType, targetService, saasProductCode);
+    if (saasValidation) {
+      return res.status(400).json({ error: saasValidation });
     }
 
     const existing = await prisma.program.findUnique({ where: { appCode } });
@@ -97,6 +134,9 @@ router.post('/programs', integrationAuthMiddleware, async (req: Request, res: Re
         appCode,
         name,
         description,
+        productType,
+        targetService: productType === ProgramProductType.SAAS ? targetService : null,
+        saasProductCode: productType === ProgramProductType.SAAS ? saasProductCode : null,
         defaultLicenseDays,
         defaultMaxDevices,
         isActive,
@@ -107,6 +147,63 @@ router.post('/programs', integrationAuthMiddleware, async (req: Request, res: Re
   } catch (err) {
     console.error('Create program error:', err);
     return res.status(500).json({ error: 'Program oluşturulamadı' });
+  }
+});
+
+router.get('/customer-licenses', integrationAuthMiddleware, async (req: Request, res: Response) => {
+  try {
+    const email = String(req.query.email ?? '')
+      .trim()
+      .toLowerCase();
+    if (!email) {
+      return res.status(400).json({ error: 'email zorunludur' });
+    }
+
+    const customer = await prisma.customer.findFirst({
+      where: { email: { equals: email, mode: 'insensitive' } },
+      select: { id: true },
+    });
+    if (!customer) {
+      return res.json([]);
+    }
+
+    const licenses = await prisma.license.findMany({
+      where: { customerId: customer.id },
+      include: { program: { select: { appCode: true, name: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return res.json(
+      licenses.map((lic) => {
+        const notes = lic.notes ?? '';
+        const marker = 'Website sipariş no:';
+        const markerIdx = notes.indexOf(marker);
+        const externalRef =
+          markerIdx >= 0 ? notes.slice(markerIdx + marker.length).trim().split(/\s/)[0] ?? '' : '';
+        const websiteOrderNo = externalRef ? externalRef.split(':')[0] || null : null;
+        const normalized = lic.licenseKey.replace(/\s+/g, '').toUpperCase();
+        const parts = normalized.split('-').filter(Boolean);
+        const last = parts[parts.length - 1] ?? '';
+        const tail = last.length >= 4 ? last.slice(-4) : '****';
+        const licenseKeyMasked = `WNTG-****-****-****-${tail}`;
+
+        return {
+          id: lic.id,
+          licenseKeyMasked,
+          programName: lic.program.name,
+          appCode: lic.program.appCode,
+          productName: lic.program.name,
+          websiteOrderNo,
+          status: lic.status,
+          expiresAt: lic.expiresAt.toISOString(),
+          maxDevices: lic.maxDevices,
+          createdAt: lic.createdAt.toISOString(),
+        };
+      }),
+    );
+  } catch (err) {
+    console.error('Customer licenses error:', err);
+    return res.status(500).json({ error: 'Müşteri lisansları alınamadı' });
   }
 });
 
@@ -133,45 +230,52 @@ router.post(
         });
       }
 
-      const program = await prisma.program.findUnique({ where: { appCode } });
+      const program = await prisma.program.findUnique({
+        where: { appCode: normalizeAppCode(appCode) },
+      });
       if (!program || !program.isActive) {
         return res.status(400).json({ error: 'Geçersiz veya pasif program kodu' });
       }
 
-      const normalizedEmail = String(customerEmail).trim().toLowerCase();
-      const normalizedName = String(customerName).trim();
-      const normalizedPhone = customerPhone?.trim() || null;
+      const customer = await resolveOrCreateCustomer(
+        customerName,
+        customerEmail,
+        customerPhone,
+        orderNo
+      );
 
-      let customer = await prisma.customer.findFirst({
-        where: { email: { equals: normalizedEmail, mode: 'insensitive' } },
-      });
-
-      if (!customer) {
-        customer = await prisma.customer.create({
-          data: {
-            name: normalizedName,
-            email: normalizedEmail,
-            phone: normalizedPhone,
-            notes: `Website siparişi: ${orderNo}`,
-          },
+      if (!isDesktopProgram(program)) {
+        const saasResult = await handleSaasWebsiteOrder(program, customer, {
+          customerId: customer.id,
+          customerName: String(customerName).trim(),
+          customerEmail: String(customerEmail).trim().toLowerCase(),
+          orderNo,
+          licenseDays: licenseDays ?? program.defaultLicenseDays,
         });
-      } else {
-        const updates: { name?: string; phone?: string | null; email?: string } = {};
-        if (normalizedName && customer.name !== normalizedName) {
-          updates.name = normalizedName;
-        }
-        if (normalizedPhone && customer.phone !== normalizedPhone) {
-          updates.phone = normalizedPhone;
-        }
-        if (customer.email !== normalizedEmail) {
-          updates.email = normalizedEmail;
-        }
-        if (Object.keys(updates).length > 0) {
-          customer = await prisma.customer.update({
-            where: { id: customer.id },
-            data: updates,
+
+        if (saasResult.ok) {
+          return res.status(200).json({
+            success: true,
+            alreadyExists: true,
+            deliveryType: 'SAAS',
+            orderNo: saasResult.orderNo,
+            programName: saasResult.programName,
+            provisionStatus: saasResult.provisionStatus,
+            externalTenantId: saasResult.externalTenantId ?? null,
+            loginUrl: saasResult.loginUrl ?? null,
+            mailSent: saasResult.mailSent,
           });
         }
+
+        return res.status(501).json({
+          success: false,
+          deliveryType: 'SAAS',
+          orderNo: saasResult.orderNo,
+          programName: saasResult.programName,
+          error: saasResult.error,
+          code: saasResult.error,
+          provisionStatus: saasResult.provisionStatus,
+        });
       }
 
       const noteMarker = `Website sipariş no: ${orderNo}`;

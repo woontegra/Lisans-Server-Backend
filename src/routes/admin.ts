@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
-import { LicenseSource, LicenseStatus } from '@prisma/client';
+import { LicenseSource, LicenseStatus, ProgramProductType } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { config } from '../config';
 import { authMiddleware, getClientIp } from '../middleware/auth';
@@ -16,6 +16,7 @@ import { sendLicenseMail } from '../services/mailService';
 import { LicenseEventType } from '@prisma/client';
 import { daysUntilExpiry, resolveLicenseStatus } from '../utils/license';
 import { paramId } from '../utils/params';
+import { parseProductType, validateSaasProgramFields } from '../utils/programDto';
 
 const router = Router();
 
@@ -68,16 +69,41 @@ router.get('/programs', authMiddleware, async (_req: Request, res: Response) => 
 
 router.post('/programs', authMiddleware, async (req: Request, res: Response) => {
   try {
-    const { appCode, name, description, defaultLicenseDays, defaultMaxDevices, isActive } =
-      req.body;
+    const {
+      appCode,
+      name,
+      description,
+      defaultLicenseDays,
+      defaultMaxDevices,
+      isActive,
+      productType: rawProductType,
+      targetService,
+      saasProductCode,
+    } = req.body;
     if (!appCode || !name) {
       return res.status(400).json({ error: 'appCode ve name zorunludur' });
     }
+
+    const productType = parseProductType(rawProductType);
+    const saasValidation = validateSaasProgramFields(
+      productType,
+      targetService,
+      saasProductCode
+    );
+    if (saasValidation) {
+      return res.status(400).json({ error: saasValidation });
+    }
+
     const program = await prisma.program.create({
       data: {
-        appCode,
-        name,
+        appCode: String(appCode).trim().toUpperCase(),
+        name: String(name).trim(),
         description,
+        productType,
+        targetService:
+          productType === ProgramProductType.SAAS ? String(targetService).trim() : null,
+        saasProductCode:
+          productType === ProgramProductType.SAAS ? String(saasProductCode).trim() : null,
         defaultLicenseDays: defaultLicenseDays ?? 365,
         defaultMaxDevices: defaultMaxDevices ?? 1,
         isActive: isActive ?? true,

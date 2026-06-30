@@ -16,17 +16,57 @@ model Admin {
   updatedAt    DateTime @updatedAt
 }
 
+enum ProgramProductType {
+  DESKTOP
+  SAAS
+}
+
+enum ProvisionStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
 model Program {
-  id                 String    @id @default(uuid())
-  appCode            String    @unique
+  id                 String             @id @default(uuid())
+  appCode            String             @unique
   name               String
   description        String?
-  defaultLicenseDays Int       @default(365)
-  defaultMaxDevices  Int       @default(1)
-  isActive           Boolean   @default(true)
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
+  productType        ProgramProductType   @default(DESKTOP)
+  targetService      String?
+  saasProductCode    String?
+  defaultLicenseDays Int                @default(365)
+  defaultMaxDevices  Int                @default(1)
+  isActive           Boolean            @default(true)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
   licenses           License[]
+  saasDeliveries     SaasDelivery[]
+}
+
+model SaasDelivery {
+  id                     String           @id @default(uuid())
+  externalOrderId        String           @unique
+  customerId             String?
+  customer               Customer?        @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  programId              String
+  program                Program          @relation(fields: [programId], references: [id], onDelete: Restrict)
+  targetService          String
+  provisionStatus        ProvisionStatus  @default(PENDING)
+  provisionError         String?
+  provisionedAt          DateTime?
+  lastProvisionAttemptAt DateTime?
+  externalTenantId       String?
+  externalTenantSlug     String?
+  loginUrl               String?
+  mailSent               Boolean          @default(false)
+  rawResponse            Json?
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
+
+  @@index([programId])
+  @@index([provisionStatus])
+  @@index([customerId])
 }
 
 model Customer {
@@ -38,7 +78,8 @@ model Customer {
   notes       String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
-  licenses    License[]
+  licenses       License[]
+  saasDeliveries SaasDelivery[]
 }
 
 enum LicenseSource {
