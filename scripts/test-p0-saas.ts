@@ -183,25 +183,30 @@ async function main() {
       String(saasOrder.status)
     );
     assert(saasOrder.data.deliveryType === 'SAAS', 'SaaS deliveryType');
-    assert(saasOrder.data.provisionStatus === 'SUCCESS', 'SaaS provision SUCCESS');
-    assert(!saasOrder.data.licenseKey, 'SaaS no licenseKey');
+    assert(!!saasOrder.data.licenseKey, 'SaaS licenseKey created');
     assert(!saasOrder.data.activationPassword, 'SaaS no activationPassword');
+    assert(saasOrder.data.provisionStatus === 'SUCCESS', 'SaaS provision SUCCESS');
   } else {
     assert(saasOrder.status === 501, 'SaaS order-license returns 501 without provider', String(saasOrder.status));
     assert(saasOrder.data.deliveryType === 'SAAS', 'SaaS deliveryType');
+    assert(!!saasOrder.data.licenseKey, 'SaaS licenseKey created even when provision fails');
     assert(
       saasOrder.data.code === 'SAAS_PROVIDER_NOT_CONFIGURED',
       'SaaS provider not configured',
       String(saasOrder.data.code)
     );
-    assert(!saasOrder.data.licenseKey, 'SaaS no licenseKey');
     assert(!saasOrder.data.activationPassword, 'SaaS no activationPassword');
   }
 
   const delivery = await prisma.saasDelivery.findUnique({
     where: { externalOrderId: saasOrderNo },
   });
+  const saasLicense = await prisma.license.findFirst({
+    where: { notes: `Website sipariş no: ${saasOrderNo}` },
+  });
+  assert(!!saasLicense, 'License record exists for SaaS order');
   assert(!!delivery, 'SaasDelivery record exists');
+  assert(delivery?.licenseId === saasLicense?.id, 'SaasDelivery linked to license');
   assert(
     delivery?.provisionStatus === (hasProvider ? 'SUCCESS' : 'FAILED'),
     hasProvider ? 'SaasDelivery SUCCESS' : 'SaasDelivery FAILED',

@@ -51,6 +51,8 @@ model SaasDelivery {
   customer               Customer?        @relation(fields: [customerId], references: [id], onDelete: SetNull)
   programId              String
   program                Program          @relation(fields: [programId], references: [id], onDelete: Restrict)
+  licenseId              String?
+  license                License?         @relation(fields: [licenseId], references: [id], onDelete: SetNull)
   targetService          String
   provisionStatus        ProvisionStatus  @default(PENDING)
   provisionError         String?
@@ -112,6 +114,7 @@ model License {
   program                Program         @relation(fields: [programId], references: [id])
   devices                LicenseDevice[]
   events                 LicenseEvent[]
+  saasDeliveries         SaasDelivery[]
 
   @@index([customerId])
   @@index([programId])

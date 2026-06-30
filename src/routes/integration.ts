@@ -252,6 +252,8 @@ router.post(
           customerPhone: customerPhone ? String(customerPhone).trim() : null,
           orderNo,
           licenseDays: licenseDays ?? program.defaultLicenseDays,
+          maxDevices: maxDevices ?? program.defaultMaxDevices,
+          ipAddress: getClientIp(req),
         });
 
         if (saasResult.ok) {
@@ -260,6 +262,7 @@ router.post(
             alreadyExists: saasResult.alreadyExists,
             deliveryType: 'SAAS',
             orderNo: saasResult.orderNo,
+            licenseKey: saasResult.licenseKey,
             programName: saasResult.programName,
             provisionStatus: saasResult.provisionStatus,
             externalTenantId: saasResult.externalTenantId ?? null,
@@ -274,6 +277,7 @@ router.post(
           deliveryType: 'SAAS',
           orderNo: saasResult.orderNo,
           programName: saasResult.programName,
+          licenseKey: saasResult.licenseKey ?? null,
           error: saasResult.error,
           code: saasResult.error,
           provisionStatus: saasResult.provisionStatus,
