@@ -249,19 +249,21 @@ router.post(
           customerId: customer.id,
           customerName: String(customerName).trim(),
           customerEmail: String(customerEmail).trim().toLowerCase(),
+          customerPhone: customerPhone ? String(customerPhone).trim() : null,
           orderNo,
           licenseDays: licenseDays ?? program.defaultLicenseDays,
         });
 
         if (saasResult.ok) {
-          return res.status(200).json({
+          return res.status(saasResult.alreadyExists ? 200 : 201).json({
             success: true,
-            alreadyExists: true,
+            alreadyExists: saasResult.alreadyExists,
             deliveryType: 'SAAS',
             orderNo: saasResult.orderNo,
             programName: saasResult.programName,
             provisionStatus: saasResult.provisionStatus,
             externalTenantId: saasResult.externalTenantId ?? null,
+            externalTenantSlug: saasResult.externalTenantSlug ?? null,
             loginUrl: saasResult.loginUrl ?? null,
             mailSent: saasResult.mailSent,
           });

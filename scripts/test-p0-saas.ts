@@ -172,17 +172,41 @@ async function main() {
     },
     integrationHeaders
   );
-  assert(saasOrder.status === 501, 'SaaS order-license returns 501', String(saasOrder.status));
-  assert(saasOrder.data.deliveryType === 'SAAS', 'SaaS deliveryType');
-  assert(saasOrder.data.code === 'SAAS_PROVISIONING_NOT_IMPLEMENTED', 'SaaS controlled error');
-  assert(!saasOrder.data.licenseKey, 'SaaS no licenseKey');
-  assert(!saasOrder.data.activationPassword, 'SaaS no activationPassword');
+  const hasProvider = !!(
+    process.env.SAAS_PROVIDER_MUVEKKIL_KASA_URL?.trim() &&
+    process.env.SAAS_PROVIDER_MUVEKKIL_KASA_API_KEY?.trim()
+  );
+  if (hasProvider) {
+    assert(
+      saasOrder.status === 201 || saasOrder.status === 200,
+      'SaaS order-license success when provider configured',
+      String(saasOrder.status)
+    );
+    assert(saasOrder.data.deliveryType === 'SAAS', 'SaaS deliveryType');
+    assert(saasOrder.data.provisionStatus === 'SUCCESS', 'SaaS provision SUCCESS');
+    assert(!saasOrder.data.licenseKey, 'SaaS no licenseKey');
+    assert(!saasOrder.data.activationPassword, 'SaaS no activationPassword');
+  } else {
+    assert(saasOrder.status === 501, 'SaaS order-license returns 501 without provider', String(saasOrder.status));
+    assert(saasOrder.data.deliveryType === 'SAAS', 'SaaS deliveryType');
+    assert(
+      saasOrder.data.code === 'SAAS_PROVIDER_NOT_CONFIGURED',
+      'SaaS provider not configured',
+      String(saasOrder.data.code)
+    );
+    assert(!saasOrder.data.licenseKey, 'SaaS no licenseKey');
+    assert(!saasOrder.data.activationPassword, 'SaaS no activationPassword');
+  }
 
   const delivery = await prisma.saasDelivery.findUnique({
     where: { externalOrderId: saasOrderNo },
   });
   assert(!!delivery, 'SaasDelivery record exists');
-  assert(delivery?.provisionStatus === 'FAILED', 'SaasDelivery FAILED', delivery?.provisionStatus ?? '');
+  assert(
+    delivery?.provisionStatus === (hasProvider ? 'SUCCESS' : 'FAILED'),
+    hasProvider ? 'SaasDelivery SUCCESS' : 'SaasDelivery FAILED',
+    delivery?.provisionStatus ?? ''
+  );
 
   await prisma.saasDelivery.deleteMany({
     where: { externalOrderId: { startsWith: 'TEST-SAAS-P0-' } },
