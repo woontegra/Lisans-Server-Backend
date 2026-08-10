@@ -14,7 +14,8 @@
     "seed": "node dist/seed.js",
     "seed:dev": "tsx src/seed.ts",
     "test:api": "tsx scripts/test-api.ts",
-    "test:p0-saas": "tsx scripts/test-p0-saas.ts"
+    "test:p0-saas": "tsx scripts/test-p0-saas.ts",
+    "test:renew-license": "tsx scripts/test-renew-license.ts"
   },
   "prisma": {
     "seed": "node dist/seed.js"

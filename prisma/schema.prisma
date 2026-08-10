@@ -115,6 +115,7 @@ model License {
   devices                LicenseDevice[]
   events                 LicenseEvent[]
   saasDeliveries         SaasDelivery[]
+  websiteRenewals        WebsiteLicenseRenewal[]
 
   @@index([customerId])
   @@index([programId])
@@ -169,4 +170,18 @@ model LicenseEvent {
 
   @@index([licenseId])
   @@index([createdAt])
+}
+
+/// Website masaüstü lisans yenileme — orderNo idempotency (yeni lisans oluşturmaz).
+model WebsiteLicenseRenewal {
+  id                String   @id @default(uuid())
+  externalOrderId   String   @unique
+  licenseId         String
+  license           License  @relation(fields: [licenseId], references: [id], onDelete: Cascade)
+  renewalDays       Int
+  previousExpiresAt DateTime
+  newExpiresAt      DateTime
+  createdAt         DateTime @default(now())
+
+  @@index([licenseId])
 }

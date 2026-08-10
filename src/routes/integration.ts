@@ -4,6 +4,11 @@ import { prisma } from '../lib/prisma';
 import { integrationAuthMiddleware, getClientIp } from '../middleware/auth';
 import { createLicense, regenerateActivationPassword } from '../services/licenseService';
 import { handleSaasWebsiteOrder, isDesktopProgram } from '../services/saasOrderService';
+import {
+  openDesktopRenewal,
+  renewWebsiteLicense,
+  WebsiteRenewalError,
+} from '../services/websiteRenewalService';
 import { parseProductType, toProgramDto, validateSaasProgramFields } from '../utils/programDto';
 
 const router = Router();
@@ -337,6 +342,80 @@ router.post(
       return res.status(500).json({ error: message });
     }
   }
+);
+
+router.post(
+  '/renew-license',
+  integrationAuthMiddleware,
+  async (req: Request, res: Response) => {
+    try {
+      const orderNo = typeof req.body?.orderNo === 'string' ? req.body.orderNo.trim() : '';
+      const licenseKey = typeof req.body?.licenseKey === 'string' ? req.body.licenseKey : '';
+      const licenseId = typeof req.body?.licenseId === 'string' ? req.body.licenseId.trim() : null;
+      const appCode = normalizeAppCode(req.body?.appCode);
+      const licenseDays = Number(req.body?.licenseDays);
+
+      if (!orderNo || !licenseKey || !appCode || !Number.isFinite(licenseDays)) {
+        return res.status(400).json({
+          success: false,
+          error: 'orderNo, licenseKey, appCode ve licenseDays zorunludur',
+        });
+      }
+
+      const result = await renewWebsiteLicense({
+        orderNo,
+        licenseKey,
+        licenseId,
+        appCode,
+        licenseDays,
+        ipAddress: getClientIp(req),
+      });
+
+      return res.status(200).json({
+        success: true,
+        alreadyRenewed: result.alreadyRenewed,
+        licenseKey: result.licenseKey,
+        previousExpiresAt: result.previousExpiresAt,
+        newExpiresAt: result.newExpiresAt,
+        status: result.status,
+      });
+    } catch (err) {
+      if (err instanceof WebsiteRenewalError) {
+        return res.status(err.status).json({ success: false, error: err.message, code: err.code });
+      }
+      console.error('Website renew-license error:', err);
+      const message = err instanceof Error ? err.message : 'Lisans yenilenemedi';
+      return res.status(500).json({ success: false, error: message });
+    }
+  },
+);
+
+router.post(
+  '/desktop-renewal/open',
+  integrationAuthMiddleware,
+  async (req: Request, res: Response) => {
+    try {
+      const licenseKey = typeof req.body?.licenseKey === 'string' ? req.body.licenseKey : '';
+      const deviceHash = typeof req.body?.deviceHash === 'string' ? req.body.deviceHash : '';
+      const appCode = normalizeAppCode(req.body?.appCode);
+
+      if (!licenseKey || !deviceHash || !appCode) {
+        return res.status(400).json({
+          error: 'licenseKey, deviceHash ve appCode zorunludur',
+        });
+      }
+
+      const result = await openDesktopRenewal({ licenseKey, deviceHash, appCode });
+      return res.json(result);
+    } catch (err) {
+      if (err instanceof WebsiteRenewalError) {
+        return res.status(err.status).json({ error: err.message, code: err.code });
+      }
+      console.error('Desktop renewal open error:', err);
+      const message = err instanceof Error ? err.message : 'Yenileme oturumu açılamadı';
+      return res.status(500).json({ error: message });
+    }
+  },
 );
 
 export default router;
