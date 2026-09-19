@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { hashPassword } from './utils/password';
+import { KOOPPLUS_PROGRAM_DEFAULTS } from './constants/desktopTrial';
 
 const prisma = new PrismaClient();
 
@@ -38,6 +39,13 @@ const DEFAULT_PROGRAMS = [
     description: 'Bilirkişi masaüstü uygulaması',
     defaultLicenseDays: 365,
     defaultMaxDevices: 1,
+  },
+  {
+    appCode: KOOPPLUS_PROGRAM_DEFAULTS.appCode,
+    name: KOOPPLUS_PROGRAM_DEFAULTS.name,
+    description: KOOPPLUS_PROGRAM_DEFAULTS.description,
+    defaultLicenseDays: KOOPPLUS_PROGRAM_DEFAULTS.defaultLicenseDays,
+    defaultMaxDevices: KOOPPLUS_PROGRAM_DEFAULTS.defaultMaxDevices,
   },
 ];
 

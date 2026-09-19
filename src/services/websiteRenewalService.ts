@@ -8,6 +8,7 @@ import {
 import { prisma } from '../lib/prisma';
 import { logLicenseEvent } from './licenseService';
 import { isDesktopProgram } from './saasOrderService';
+import { isSystemTrialLicenseNotes } from '../constants/desktopTrial';
 
 export class WebsiteRenewalError extends Error {
   constructor(
@@ -139,6 +140,13 @@ export async function renewWebsiteLicense(
   if (license.status === LicenseStatus.PASSIVE) {
     throw new WebsiteRenewalError('Lisans pasif durumda', 'LICENSE_PASSIVE', 400);
   }
+  if (isSystemTrialLicenseNotes(license.notes)) {
+    throw new WebsiteRenewalError(
+      'Deneme lisansı website yenileme akışına giremez',
+      'TRIAL_LICENSE_NOT_RENEWABLE',
+      400,
+    );
+  }
 
   const previousExpiresAt = new Date(license.expiresAt);
   const baseDate = computeExtensionBaseDate(previousExpiresAt);
@@ -251,6 +259,13 @@ export async function openDesktopRenewal(
     throw new WebsiteRenewalError(
       'Bu ürün için yenileme desteklenmiyor',
       'NOT_DESKTOP_PRODUCT',
+      400,
+    );
+  }
+  if (isSystemTrialLicenseNotes(license.notes)) {
+    throw new WebsiteRenewalError(
+      'Deneme lisansı website yenileme akışına giremez',
+      'TRIAL_LICENSE_NOT_RENEWABLE',
       400,
     );
   }

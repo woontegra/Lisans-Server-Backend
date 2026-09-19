@@ -4,6 +4,7 @@
  */
 import app from '../src/app';
 import { PrismaClient } from '@prisma/client';
+import { assertLocalDatabaseUrl } from './assertLocalTestTarget';
 
 const INTEGRATION_SECRET = process.env.INTEGRATION_SECRET || 'change-me-integration-secret';
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@woontegra.com';
@@ -46,10 +47,12 @@ const DESKTOP_APP_CODES = [
   'MUVEKKIL_KASA_DESKTOP',
   'OPTIK_DESKTOP',
   'SIFRE_KASASI_DESKTOP',
+  'KOOPPLUS_DESKTOP',
 ];
 
 async function main() {
   console.log('\n=== P0 SaaS + Desktop Regression Tests ===\n');
+  assertLocalDatabaseUrl();
 
   const server = await new Promise<import('http').Server>((resolve) => {
     const s = app.listen(0, () => resolve(s));

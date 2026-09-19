@@ -42,6 +42,7 @@ model Program {
   updatedAt          DateTime           @updatedAt
   licenses           License[]
   saasDeliveries     SaasDelivery[]
+  desktopTrialGrants DesktopTrialGrant[]
 }
 
 model SaasDelivery {
@@ -116,6 +117,7 @@ model License {
   events                 LicenseEvent[]
   saasDeliveries         SaasDelivery[]
   websiteRenewals        WebsiteLicenseRenewal[]
+  desktopTrialGrants     DesktopTrialGrant[]
 
   @@index([customerId])
   @@index([programId])
@@ -183,5 +185,32 @@ model WebsiteLicenseRenewal {
   newExpiresAt      DateTime
   createdAt         DateTime @default(now())
 
+  @@index([licenseId])
+}
+
+enum DesktopTrialStatus {
+  ACTIVE
+  EXPIRED
+}
+
+/// KoopPlus otomatik 7 günlük demo hakkı. Satır silinmez; (programId, deviceHash) unique.
+model DesktopTrialGrant {
+  id              String             @id @default(uuid())
+  programId       String
+  program         Program            @relation(fields: [programId], references: [id], onDelete: Restrict)
+  deviceHash      String
+  deviceName      String?
+  platform        String?
+  appVersion      String?
+  licenseId       String?
+  license         License?           @relation(fields: [licenseId], references: [id], onDelete: SetNull)
+  status          DesktopTrialStatus @default(ACTIVE)
+  createdAt       DateTime           @default(now())
+  expiresAt       DateTime
+  lastValidatedAt DateTime?
+
+  @@unique([programId, deviceHash])
+  @@index([programId])
+  @@index([expiresAt])
   @@index([licenseId])
 }

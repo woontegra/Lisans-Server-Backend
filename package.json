@@ -15,7 +15,9 @@
     "seed:dev": "tsx src/seed.ts",
     "test:api": "tsx scripts/test-api.ts",
     "test:p0-saas": "tsx scripts/test-p0-saas.ts",
-    "test:renew-license": "tsx scripts/test-renew-license.ts"
+    "test:renew-license": "tsx scripts/test-renew-license.ts",
+    "test:trial": "node scripts/run-trial-tests.mjs",
+    "test:trial:unit": "tsx scripts/test-trial-unit.ts"
   },
   "prisma": {
     "seed": "node dist/seed.js"
@@ -37,6 +39,7 @@
     "@types/jsonwebtoken": "^9.0.9",
     "@types/node": "^22.15.29",
     "@types/nodemailer": "^6.4.17",
+    "embedded-postgres": "^18.4.0-beta.17",
     "tsx": "^4.19.4",
     "typescript": "^5.8.3"
   }

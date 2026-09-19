@@ -4,6 +4,7 @@
  *
  * Usage: npx tsx scripts/test-api.ts
  */
+import { assertLocalApiBase } from './assertLocalTestTarget';
 
 const BASE = process.env.API_BASE || 'http://localhost:4000';
 
@@ -32,6 +33,7 @@ async function json(method: string, path: string, body?: unknown, headers?: Reco
 
 async function main() {
   console.log('\n=== Woontegra Lisans Server API Tests ===\n');
+  assertLocalApiBase(BASE);
 
   // Health
   const health = await json('GET', '/health');

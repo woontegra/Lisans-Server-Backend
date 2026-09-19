@@ -12,6 +12,7 @@ import {
   computeExtensionBaseDate,
   dayStart,
 } from '../src/services/websiteRenewalService';
+import { assertLocalDatabaseUrl } from './assertLocalTestTarget';
 
 const INTEGRATION_SECRET = process.env.INTEGRATION_SECRET || 'change-me-integration-secret';
 
@@ -43,6 +44,7 @@ function localYmd(d: Date): string {
 
 async function main() {
   console.log('\n=== renew-license integration tests ===\n');
+  assertLocalDatabaseUrl();
 
   // Saf tarih kuralı (website ile uyum)
   {
