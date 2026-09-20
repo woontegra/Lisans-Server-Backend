@@ -11,6 +11,7 @@ import {
 } from '../src/constants/desktopTrial';
 import { config } from '../src/config';
 import { DesktopTrialError, startDesktopTrial } from '../src/services/desktopTrialService';
+import { normalizeTrialEmail, normalizeTurkishMobile } from '../src/lib/trialContact';
 
 let passed = 0;
 let failed = 0;
@@ -94,6 +95,37 @@ async function main() {
     TRIAL_ERROR_CODES.INVALID_REQUEST,
     'startDesktopTrial rejects missing appCode before DB'
   );
+
+  await expectCode(
+    () =>
+      startDesktopTrial({
+        appCode: APP_CODE_KOOPPLUS_DESKTOP,
+        deviceHash: hex,
+        email: 'not-an-email',
+        phone: '+905321234567',
+      }),
+    TRIAL_ERROR_CODES.INVALID_EMAIL,
+    'startDesktopTrial rejects invalid email before DB'
+  );
+  await expectCode(
+    () =>
+      startDesktopTrial({
+        appCode: APP_CODE_KOOPPLUS_DESKTOP,
+        deviceHash: hex,
+        email: 'ok@example.com',
+        phone: '02121234567',
+      }),
+    TRIAL_ERROR_CODES.INVALID_PHONE,
+    'startDesktopTrial rejects landline before DB'
+  );
+
+  assert(normalizeTrialEmail('  SERDAR@EXAMPLE.COM  ') === 'serdar@example.com', 'email trim+lowercase');
+  assert(normalizeTurkishMobile('0532 123 45 67') === '+905321234567', 'TR mobile 0532…');
+  assert(normalizeTurkishMobile('+90 532 123 45 67') === '+905321234567', 'TR mobile +90…');
+  assert(normalizeTurkishMobile('0090 532 123 45 67') === '+905321234567', 'TR mobile 0090…');
+  assert(normalizeTurkishMobile('(0532) 123-45-67') === '+905321234567', 'TR mobile punctuation');
+  assert(TRIAL_ERROR_CODES.INVALID_EMAIL === 'INVALID_EMAIL', 'INVALID_EMAIL code');
+  assert(TRIAL_ERROR_CODES.INVALID_PHONE === 'INVALID_PHONE', 'INVALID_PHONE code');
 
   console.log(`\n=== Unit results: ${passed} passed, ${failed} failed ===\n`);
   process.exit(failed > 0 ? 1 : 0);

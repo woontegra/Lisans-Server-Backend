@@ -195,21 +195,25 @@ enum DesktopTrialStatus {
 
 /// KoopPlus otomatik 7 günlük demo hakkı. Satır silinmez; (programId, deviceHash) unique.
 model DesktopTrialGrant {
-  id              String             @id @default(uuid())
-  programId       String
-  program         Program            @relation(fields: [programId], references: [id], onDelete: Restrict)
-  deviceHash      String
-  deviceName      String?
-  platform        String?
-  appVersion      String?
-  licenseId       String?
-  license         License?           @relation(fields: [licenseId], references: [id], onDelete: SetNull)
-  status          DesktopTrialStatus @default(ACTIVE)
-  createdAt       DateTime           @default(now())
-  expiresAt       DateTime
-  lastValidatedAt DateTime?
+  id               String             @id @default(uuid())
+  programId        String
+  program          Program            @relation(fields: [programId], references: [id], onDelete: Restrict)
+  deviceHash       String
+  deviceName       String?
+  platform         String?
+  appVersion       String?
+  emailNormalized  String?
+  phoneNormalized  String?
+  licenseId        String?
+  license          License?           @relation(fields: [licenseId], references: [id], onDelete: SetNull)
+  status           DesktopTrialStatus @default(ACTIVE)
+  createdAt        DateTime           @default(now())
+  expiresAt        DateTime
+  lastValidatedAt  DateTime?
 
   @@unique([programId, deviceHash])
+  @@unique([programId, emailNormalized])
+  @@unique([programId, phoneNormalized])
   @@index([programId])
   @@index([expiresAt])
   @@index([licenseId])

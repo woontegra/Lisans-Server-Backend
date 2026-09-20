@@ -100,6 +100,35 @@ function daysFromNow(iso: string): number {
   return (new Date(iso).getTime() - Date.now()) / (1000 * 60 * 60 * 24);
 }
 
+const stamp = Date.now();
+
+function uniqueEmail(tag: string): string {
+  return `trial-${tag}-${stamp}@example.com`;
+}
+
+function uniqueMobile(offset: number): string {
+  const nine = String(100000000 + (stamp % 80000000) + offset).slice(-9);
+  return `+905${nine}`;
+}
+
+function trialReq(
+  deviceHash: string,
+  email: string,
+  phone: string,
+  extra: Record<string, unknown> = {}
+) {
+  return {
+    appCode: APP_CODE_KOOPPLUS_DESKTOP,
+    deviceHash,
+    deviceName: 'Test PC',
+    platform: 'win32',
+    appVersion: '1.0.0',
+    email,
+    phone,
+    ...extra,
+  };
+}
+
 async function main() {
   console.log('\n=== KoopPlus desktop trial tests ===\n');
   assertLocalDatabase();
@@ -154,21 +183,42 @@ async function main() {
 
   const deviceA = sha256Hex(`koopplus-trial-a-${Date.now()}-${Math.random()}`);
   const deviceB = sha256Hex(`koopplus-trial-b-${Date.now()}-${Math.random()}`);
+  const deviceC = sha256Hex(`koopplus-trial-c-${Date.now()}-${Math.random()}`);
+  const deviceD = sha256Hex(`koopplus-trial-d-${Date.now()}-${Math.random()}`);
+  const deviceE = sha256Hex(`koopplus-trial-e-${Date.now()}-${Math.random()}`);
+  const deviceF = sha256Hex(`koopplus-trial-f-${Date.now()}-${Math.random()}`);
+  const deviceG = sha256Hex(`koopplus-trial-g-${Date.now()}-${Math.random()}`);
+  const deviceH = sha256Hex(`koopplus-trial-h-${Date.now()}-${Math.random()}`);
   const raceDevice = sha256Hex(`koopplus-trial-race-${Date.now()}-${Math.random()}`);
   const expiredDevice = sha256Hex(`koopplus-trial-expired-${Date.now()}-${Math.random()}`);
+  const legacyDevice = sha256Hex(`koopplus-trial-legacy-${Date.now()}-${Math.random()}`);
 
-  const trialBody = {
-    appCode: APP_CODE_KOOPPLUS_DESKTOP,
-    deviceHash: deviceA,
-    deviceName: 'Test PC',
-    platform: 'win32',
-    appVersion: '1.0.0',
-  };
+  const emailA = uniqueEmail('a');
+  const emailB = uniqueEmail('b');
+  const emailC = uniqueEmail('c');
+  const emailD = uniqueEmail('d');
+  const emailE = uniqueEmail('e');
+  const emailF = uniqueEmail('f');
+  const emailG = uniqueEmail('g');
+  const emailH = uniqueEmail('h');
+  const phoneA = uniqueMobile(1);
+  const phoneB = uniqueMobile(2);
+  const phoneC = uniqueMobile(3);
+  const phoneD = uniqueMobile(4);
+  const phoneE = uniqueMobile(5);
+  const phoneF = uniqueMobile(6);
+  const phoneG = uniqueMobile(7);
+  const phoneH = uniqueMobile(8);
+  const phoneRace = uniqueMobile(9);
+  const emailRace = uniqueEmail('race');
+
+  const trialBody = trialReq(deviceA, emailA, phoneA);
 
   const first = await json('POST', '/api/public/license/trial', trialBody);
-  assert(first.status === 201 && first.data.success === true, '1) new device gets 7-day trial');
+  assert(first.status === 201 && first.data.success === true, '1) new device+email+phone gets 7-day trial');
   assert(first.data.trial === true, 'trial flag true');
-  const expiryDays = daysFromNow(first.data.expiresAt);
+  const firstExpiresAt = first.data.expiresAt as string;
+  const expiryDays = daysFromNow(firstExpiresAt);
   assert(
     expiryDays > DESKTOP_TRIAL_DAYS - 0.05 && expiryDays < DESKTOP_TRIAL_DAYS + 0.05,
     '9) expiresAt ≈ serverNow + 7 days',
@@ -181,16 +231,80 @@ async function main() {
   );
   assert(!first.data.licenseKey, 'trial response does not leak licenseKey');
   assert(!first.data.activationPassword, 'trial response does not leak activationPassword');
+  assert(!first.data.email && !first.data.emailNormalized, 'trial response does not leak email');
+  assert(!first.data.phone && !first.data.phoneNormalized, 'trial response does not leak phone');
 
   const grantsAfterFirst = await prisma.desktopTrialGrant.count({
     where: { programId: koop!.id, deviceHash: deviceA },
   });
   assert(grantsAfterFirst === 1, 'exactly one grant for device A');
 
-  const again = await json('POST', '/api/public/license/trial', trialBody);
+  const resumeSame = await json('POST', '/api/public/license/trial', trialBody);
   assert(
-    again.data.success === false && again.data.code === TRIAL_ERROR_CODES.TRIAL_ALREADY_USED,
-    '2) same device + KOOPPLUS_DESKTOP → TRIAL_ALREADY_USED'
+    resumeSame.data.success === true && resumeSame.data.expiresAt === firstExpiresAt,
+    'same triple ACTIVE resumes existing grant without +7'
+  );
+
+  const sameDeviceDifferentContact = await json(
+    'POST',
+    '/api/public/license/trial',
+    trialReq(deviceA, emailB, phoneB)
+  );
+  assert(
+    sameDeviceDifferentContact.data.code === TRIAL_ERROR_CODES.TRIAL_ALREADY_USED,
+    '2) same device + different email/phone → TRIAL_ALREADY_USED'
+  );
+
+  const sameEmailDifferentDevice = await json(
+    'POST',
+    '/api/public/license/trial',
+    trialReq(deviceB, emailA, phoneC)
+  );
+  assert(
+    sameEmailDifferentDevice.data.code === TRIAL_ERROR_CODES.TRIAL_ALREADY_USED,
+    '3) same email + different device/phone → TRIAL_ALREADY_USED'
+  );
+
+  const samePhoneDifferentDevice = await json(
+    'POST',
+    '/api/public/license/trial',
+    trialReq(deviceB, emailC, phoneA)
+  );
+  assert(
+    samePhoneDifferentDevice.data.code === TRIAL_ERROR_CODES.TRIAL_ALREADY_USED,
+    '4) same phone + different device/email → TRIAL_ALREADY_USED'
+  );
+
+  const phoneFormatFirst = await json(
+    'POST',
+    '/api/public/license/trial',
+    trialReq(deviceC, emailD, '05321234567')
+  );
+  assert(phoneFormatFirst.status === 201 && phoneFormatFirst.data.success === true, '5a) 05321234567 accepted');
+  const phoneFormatAgain = await json(
+    'POST',
+    '/api/public/license/trial',
+    trialReq(deviceD, emailE, '+90 532 123 45 67')
+  );
+  assert(
+    phoneFormatAgain.data.code === TRIAL_ERROR_CODES.TRIAL_ALREADY_USED,
+    '5b) +90 532 123 45 67 matches canonical phone → TRIAL_ALREADY_USED'
+  );
+
+  const emailCaseFirst = await json(
+    'POST',
+    '/api/public/license/trial',
+    trialReq(deviceE, 'TEST@example.com', phoneE)
+  );
+  assert(emailCaseFirst.status === 201 && emailCaseFirst.data.success === true, '6a) mixed-case email accepted');
+  const emailCaseAgain = await json(
+    'POST',
+    '/api/public/license/trial',
+    trialReq(deviceF, 'test@example.com', phoneF)
+  );
+  assert(
+    emailCaseAgain.data.code === TRIAL_ERROR_CODES.TRIAL_ALREADY_USED,
+    '6b) email case change → TRIAL_ALREADY_USED'
   );
 
   await prisma.desktopTrialGrant.create({
@@ -201,13 +315,87 @@ async function main() {
       status: 'EXPIRED',
     },
   });
-  const expiredRetry = await json('POST', '/api/public/license/trial', {
-    appCode: APP_CODE_KOOPPLUS_DESKTOP,
-    deviceHash: expiredDevice,
-  });
+  const expiredRetry = await json(
+    'POST',
+    '/api/public/license/trial',
+    trialReq(expiredDevice, uniqueEmail('expired-device'), uniqueMobile(21))
+  );
   assert(
     expiredRetry.data.code === TRIAL_ERROR_CODES.TRIAL_ALREADY_USED,
-    '3) expired trial cannot start another trial'
+    '9) expired device cannot start another trial'
+  );
+
+  const expiredEmailDevice = sha256Hex(`koopplus-expired-email-${Date.now()}`);
+  const expiredEmail = uniqueEmail('expired-email');
+  await prisma.desktopTrialGrant.create({
+    data: {
+      programId: koop!.id,
+      deviceHash: expiredEmailDevice,
+      emailNormalized: expiredEmail,
+      phoneNormalized: uniqueMobile(22),
+      expiresAt: new Date(Date.now() - 60_000),
+      status: 'EXPIRED',
+    },
+  });
+  const expiredEmailRetry = await json(
+    'POST',
+    '/api/public/license/trial',
+    trialReq(deviceG, expiredEmail, uniqueMobile(23))
+  );
+  assert(
+    expiredEmailRetry.data.code === TRIAL_ERROR_CODES.TRIAL_ALREADY_USED,
+    '7) expired email cannot start another trial'
+  );
+
+  const expiredPhoneDevice = sha256Hex(`koopplus-expired-phone-${Date.now()}`);
+  const expiredPhone = uniqueMobile(24);
+  await prisma.desktopTrialGrant.create({
+    data: {
+      programId: koop!.id,
+      deviceHash: expiredPhoneDevice,
+      emailNormalized: uniqueEmail('expired-phone'),
+      phoneNormalized: expiredPhone,
+      expiresAt: new Date(Date.now() - 60_000),
+      status: 'EXPIRED',
+    },
+  });
+  const expiredPhoneRetry = await json(
+    'POST',
+    '/api/public/license/trial',
+    trialReq(deviceH, uniqueEmail('expired-phone-retry'), expiredPhone)
+  );
+  assert(
+    expiredPhoneRetry.data.code === TRIAL_ERROR_CODES.TRIAL_ALREADY_USED,
+    '8) expired phone cannot start another trial'
+  );
+
+  const fresh = await json(
+    'POST',
+    '/api/public/license/trial',
+    trialReq(
+      sha256Hex(`koopplus-fresh-${Date.now()}-${Math.random()}`),
+      uniqueEmail('fresh'),
+      uniqueMobile(25)
+    )
+  );
+  assert(fresh.status === 201 && fresh.data.success === true, '10) different device/email/phone → SUCCESS');
+
+  await prisma.desktopTrialGrant.create({
+    data: {
+      programId: koop!.id,
+      deviceHash: legacyDevice,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      status: 'ACTIVE',
+    },
+  });
+  const legacyRetry = await json(
+    'POST',
+    '/api/public/license/trial',
+    trialReq(legacyDevice, uniqueEmail('legacy'), uniqueMobile(26))
+  );
+  assert(
+    legacyRetry.data.code === TRIAL_ERROR_CODES.TRIAL_ALREADY_USED,
+    '14) legacy grant without email/phone still blocks same deviceHash'
   );
 
   const mkdTrial = await json('POST', '/api/public/license/trial', {
@@ -216,7 +404,7 @@ async function main() {
   });
   assert(
     mkdTrial.data.code === TRIAL_ERROR_CODES.TRIAL_NOT_AVAILABLE_FOR_PRODUCT,
-    '5) MUVEKKIL_KASA_DESKTOP /trial rejected'
+    '15) MUVEKKIL_KASA_DESKTOP /trial rejected'
   );
 
   const otherProduct = await json('POST', '/api/public/license/trial', {
@@ -225,7 +413,7 @@ async function main() {
   });
   assert(
     otherProduct.data.code === TRIAL_ERROR_CODES.TRIAL_NOT_AVAILABLE_FOR_PRODUCT,
-    '4) other product /trial closed'
+    '15) other product /trial closed'
   );
 
   if (mkd) {
@@ -242,7 +430,7 @@ async function main() {
     });
     assert(
       sameHashOtherProgram >= 2,
-      '4) same deviceHash allowed on different programId (not global unique)'
+      '15) same deviceHash allowed on different programId (not global unique)'
     );
   }
 
@@ -258,21 +446,31 @@ async function main() {
   const badHash = await json('POST', '/api/public/license/trial', {
     appCode: APP_CODE_KOOPPLUS_DESKTOP,
     deviceHash: 'not-a-hash',
+    email: uniqueEmail('bad-hash'),
+    phone: uniqueMobile(27),
   });
   assert(
     badHash.data.code === TRIAL_ERROR_CODES.INVALID_DEVICE_HASH,
     '7) invalid deviceHash controlled error'
   );
 
+  const invalidEmail = await json(
+    'POST',
+    '/api/public/license/trial',
+    trialReq(sha256Hex(`koopplus-invalid-email-${Date.now()}`), 'not-an-email', uniqueMobile(28))
+  );
+  assert(invalidEmail.data.code === TRIAL_ERROR_CODES.INVALID_EMAIL, '12) invalid email → validation error');
+
+  const invalidPhone = await json(
+    'POST',
+    '/api/public/license/trial',
+    trialReq(sha256Hex(`koopplus-invalid-phone-${Date.now()}`), uniqueEmail('invalid-phone'), '02121234567')
+  );
+  assert(invalidPhone.data.code === TRIAL_ERROR_CODES.INVALID_PHONE, '13) invalid Turkish mobile → validation error');
+
   const [race1, race2] = await Promise.all([
-    json('POST', '/api/public/license/trial', {
-      appCode: APP_CODE_KOOPPLUS_DESKTOP,
-      deviceHash: raceDevice,
-    }),
-    json('POST', '/api/public/license/trial', {
-      appCode: APP_CODE_KOOPPLUS_DESKTOP,
-      deviceHash: raceDevice,
-    }),
+    json('POST', '/api/public/license/trial', trialReq(raceDevice, emailRace, phoneRace)),
+    json('POST', '/api/public/license/trial', trialReq(raceDevice, emailRace, phoneRace)),
   ]);
   const raceSuccesses = [race1, race2].filter((r) => r.data.success === true).length;
   const raceRejected = [race1, race2].filter(
@@ -281,9 +479,19 @@ async function main() {
   const raceCount = await prisma.desktopTrialGrant.count({
     where: { programId: koop!.id, deviceHash: raceDevice },
   });
-  assert(raceSuccesses === 1, '8) concurrent trial: exactly one success', `successes=${raceSuccesses}`);
-  assert(raceRejected === 1, '8) concurrent trial: other is TRIAL_ALREADY_USED', `rejected=${raceRejected}`);
-  assert(raceCount === 1, '8) concurrent trial: one DesktopTrialGrant row');
+  assert(raceSuccesses >= 1, '11) concurrent trial: at least one success', `successes=${raceSuccesses}`);
+  assert(
+    raceSuccesses + raceRejected === 2,
+    '11) concurrent trial: only success or TRIAL_ALREADY_USED',
+    `successes=${raceSuccesses} rejected=${raceRejected}`
+  );
+  assert(raceCount === 1, '11) concurrent trial: one DesktopTrialGrant row');
+  if (raceSuccesses === 2) {
+    assert(
+      race1.data.expiresAt === race2.data.expiresAt,
+      '11) concurrent idempotent resume keeps same expiresAt'
+    );
+  }
 
   const valid = await json('POST', '/api/public/license/trial/validate', {
     appCode: APP_CODE_KOOPPLUS_DESKTOP,
@@ -317,13 +525,15 @@ async function main() {
   assert(sysCustomers === 1, 'SYSTEM trial customer is idempotent (single row)');
 
   const clockDevice = sha256Hex(`koopplus-clock-${Date.now()}-${Math.random()}`);
-  const clockTrial = await json('POST', '/api/public/license/trial', {
-    appCode: APP_CODE_KOOPPLUS_DESKTOP,
-    deviceHash: clockDevice,
-    trialStart: '2010-01-01T00:00:00.000Z',
-    currentTime: '2010-01-01T00:00:00.000Z',
-    trialExpires: '2010-01-08T00:00:00.000Z',
-  });
+  const clockTrial = await json(
+    'POST',
+    '/api/public/license/trial',
+    trialReq(clockDevice, uniqueEmail('clock'), uniqueMobile(29), {
+      trialStart: '2010-01-01T00:00:00.000Z',
+      currentTime: '2010-01-01T00:00:00.000Z',
+      trialExpires: '2010-01-08T00:00:00.000Z',
+    })
+  );
   const clockDays = daysFromNow(clockTrial.data.expiresAt);
   assert(
     clockTrial.status === 201 &&
@@ -335,10 +545,11 @@ async function main() {
 
   await prisma.program.update({ where: { id: koop!.id }, data: { isActive: false } });
   const inactiveDevice = sha256Hex(`koopplus-inactive-${Date.now()}-${Math.random()}`);
-  const inactiveTrial = await json('POST', '/api/public/license/trial', {
-    appCode: APP_CODE_KOOPPLUS_DESKTOP,
-    deviceHash: inactiveDevice,
-  });
+  const inactiveTrial = await json(
+    'POST',
+    '/api/public/license/trial',
+    trialReq(inactiveDevice, uniqueEmail('inactive'), uniqueMobile(30))
+  );
   assert(
     inactiveTrial.data.code === TRIAL_ERROR_CODES.PROGRAM_NOT_FOUND_OR_INACTIVE,
     '7) inactive KOOPPLUS_DESKTOP rejected'

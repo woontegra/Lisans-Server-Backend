@@ -18,6 +18,7 @@ import {
   SYSTEM_TRIAL_NOTES_PREFIX,
   TRIAL_ERROR_CODES,
 } from '../constants/desktopTrial';
+import { TRIAL_ALREADY_USED_MESSAGE, normalizeTrialEmail, normalizeTurkishMobile } from '../lib/trialContact';
 import { generateActivationPassword, generateLicenseKey } from '../utils/licenseKey';
 import { hashPassword } from '../utils/password';
 
@@ -39,6 +40,8 @@ export type TrialRequestInput = {
   deviceName?: unknown;
   platform?: unknown;
   appVersion?: unknown;
+  email?: unknown;
+  phone?: unknown;
 };
 
 type NormalizedTrialInput = {
@@ -47,6 +50,11 @@ type NormalizedTrialInput = {
   deviceName?: string;
   platform?: string;
   appVersion?: string;
+};
+
+type NormalizedTrialStartInput = NormalizedTrialInput & {
+  emailNormalized: string;
+  phoneNormalized: string;
 };
 
 function optionalString(value: unknown): string | undefined {
@@ -85,7 +93,31 @@ function normalizeDeviceHash(raw: unknown): string {
   return hash;
 }
 
-function normalizeInput(input: TrialRequestInput): NormalizedTrialInput {
+function normalizeTrialEmailOrThrow(raw: unknown): string {
+  const email = normalizeTrialEmail(raw);
+  if (!email) {
+    throw new DesktopTrialError(
+      TRIAL_ERROR_CODES.INVALID_EMAIL,
+      'Geçerli bir e-posta adresi girin',
+      400
+    );
+  }
+  return email;
+}
+
+function normalizeTrialPhoneOrThrow(raw: unknown): string {
+  const phone = normalizeTurkishMobile(raw);
+  if (!phone) {
+    throw new DesktopTrialError(
+      TRIAL_ERROR_CODES.INVALID_PHONE,
+      'Geçerli bir Türkiye cep telefonu girin',
+      400
+    );
+  }
+  return phone;
+}
+
+function normalizeValidateInput(input: TrialRequestInput): NormalizedTrialInput {
   return {
     appCode: normalizeAppCode(input.appCode),
     deviceHash: normalizeDeviceHash(input.deviceHash),
@@ -103,6 +135,78 @@ function computeTrialExpiry(from: Date): Date {
 
 function isP2002(err: unknown): boolean {
   return err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002';
+}
+
+function alreadyUsedError(existing?: { status: DesktopTrialStatus; expiresAt: Date }) {
+  return new DesktopTrialError(
+    TRIAL_ERROR_CODES.TRIAL_ALREADY_USED,
+    TRIAL_ALREADY_USED_MESSAGE,
+    400,
+    existing
+      ? trialPublicPayload({
+          status: existing.status,
+          expiresAt: existing.expiresAt,
+          message: TRIAL_ALREADY_USED_MESSAGE,
+        })
+      : { message: TRIAL_ALREADY_USED_MESSAGE }
+  );
+}
+
+function isSameContactIdentity(
+  grant: { deviceHash: string; emailNormalized: string | null; phoneNormalized: string | null },
+  input: NormalizedTrialStartInput
+): boolean {
+  return (
+    grant.deviceHash === input.deviceHash &&
+    grant.emailNormalized === input.emailNormalized &&
+    grant.phoneNormalized === input.phoneNormalized
+  );
+}
+
+function isActiveUnexpired(
+  grant: { status: DesktopTrialStatus; expiresAt: Date },
+  now: Date
+): boolean {
+  return grant.status === DesktopTrialStatus.ACTIVE && now <= grant.expiresAt;
+}
+
+async function findRelatedGrants(
+  db: Prisma.TransactionClient | typeof prisma,
+  programId: string,
+  input: NormalizedTrialStartInput
+) {
+  const [byDevice, byEmail, byPhone] = await Promise.all([
+    db.desktopTrialGrant.findUnique({
+      where: {
+        programId_deviceHash: {
+          programId,
+          deviceHash: input.deviceHash,
+        },
+      },
+    }),
+    db.desktopTrialGrant.findUnique({
+      where: {
+        programId_emailNormalized: {
+          programId,
+          emailNormalized: input.emailNormalized,
+        },
+      },
+    }),
+    db.desktopTrialGrant.findUnique({
+      where: {
+        programId_phoneNormalized: {
+          programId,
+          phoneNormalized: input.phoneNormalized,
+        },
+      },
+    }),
+  ]);
+
+  const unique = new Map<string, NonNullable<typeof byDevice>>();
+  for (const grant of [byDevice, byEmail, byPhone]) {
+    if (grant) unique.set(grant.id, grant);
+  }
+  return [...unique.values()];
 }
 
 async function assertTrialProgram(appCode: string) {
@@ -178,36 +282,56 @@ function trialPublicPayload(input: {
   };
 }
 
-export async function startDesktopTrial(input: TrialRequestInput) {
-  const normalized = normalizeInput(input);
-  const program = await assertTrialProgram(normalized.appCode);
+function trialStartSuccess(grant: { status: DesktopTrialStatus; expiresAt: Date }, resumed: boolean) {
+  return {
+    success: true,
+    resumed,
+    ...trialPublicPayload({
+      status: grant.status,
+      expiresAt: grant.expiresAt,
+      message: resumed ? 'Mevcut deneme lisansı devam ediyor' : '7 günlük deneme başlatıldı',
+    }),
+  };
+}
 
-  const existing = await prisma.desktopTrialGrant.findUnique({
-    where: {
-      programId_deviceHash: {
-        programId: program.id,
-        deviceHash: normalized.deviceHash,
-      },
-    },
-  });
-  if (existing) {
-    throw new DesktopTrialError(
-      TRIAL_ERROR_CODES.TRIAL_ALREADY_USED,
-      'Bu cihaz için deneme süresi daha önce kullanıldı',
-      400,
-      trialPublicPayload({
-        status: existing.status,
-        expiresAt: existing.expiresAt,
-        message: 'Bu cihaz için deneme süresi daha önce kullanıldı',
-      })
-    );
+export async function startDesktopTrial(input: TrialRequestInput) {
+  const prelim = normalizeValidateInput(input);
+  const program = await assertTrialProgram(prelim.appCode);
+  const normalized: NormalizedTrialStartInput = {
+    ...prelim,
+    emailNormalized: normalizeTrialEmailOrThrow(input.email),
+    phoneNormalized: normalizeTrialPhoneOrThrow(input.phone),
+  };
+  const now = new Date();
+
+  const existingRelated = await findRelatedGrants(prisma, program.id, normalized);
+  if (existingRelated.length === 1) {
+    const existing = existingRelated[0];
+    if (isSameContactIdentity(existing, normalized) && isActiveUnexpired(existing, now)) {
+      return trialStartSuccess(existing, true);
+    }
+    throw alreadyUsedError(existing);
+  }
+  if (existingRelated.length > 1) {
+    throw alreadyUsedError(existingRelated[0]);
   }
 
-  const now = new Date();
   const expiresAt = computeTrialExpiry(now);
 
   try {
-    const grant = await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
+      const relatedInTx = await findRelatedGrants(tx, program.id, normalized);
+      if (relatedInTx.length === 1) {
+        const existing = relatedInTx[0];
+        if (isSameContactIdentity(existing, normalized) && isActiveUnexpired(existing, now)) {
+          return { grant: existing, created: false };
+        }
+        throw alreadyUsedError(existing);
+      }
+      if (relatedInTx.length > 1) {
+        throw alreadyUsedError(relatedInTx[0]);
+      }
+
       const createdGrant = await tx.desktopTrialGrant.create({
         data: {
           programId: program.id,
@@ -215,6 +339,8 @@ export async function startDesktopTrial(input: TrialRequestInput) {
           deviceName: normalized.deviceName,
           platform: normalized.platform,
           appVersion: normalized.appVersion,
+          emailNormalized: normalized.emailNormalized,
+          phoneNormalized: normalized.phoneNormalized,
           status: DesktopTrialStatus.ACTIVE,
           expiresAt,
         },
@@ -257,34 +383,33 @@ export async function startDesktopTrial(input: TrialRequestInput) {
         },
       });
 
-      return tx.desktopTrialGrant.update({
+      const grant = await tx.desktopTrialGrant.update({
         where: { id: createdGrant.id },
         data: { licenseId: license.id },
       });
+      return { grant, created: true };
     });
 
-    return {
-      success: true,
-      ...trialPublicPayload({
-        status: grant.status,
-        expiresAt: grant.expiresAt,
-        message: '7 günlük deneme başlatıldı',
-      }),
-    };
+    return trialStartSuccess(result.grant, !result.created);
   } catch (err) {
+    if (err instanceof DesktopTrialError) throw err;
     if (isP2002(err)) {
-      throw new DesktopTrialError(
-        TRIAL_ERROR_CODES.TRIAL_ALREADY_USED,
-        'Bu cihaz için deneme süresi daha önce kullanıldı',
-        400
-      );
+      const recovered = await findRelatedGrants(prisma, program.id, normalized);
+      if (
+        recovered.length === 1 &&
+        isSameContactIdentity(recovered[0], normalized) &&
+        isActiveUnexpired(recovered[0], now)
+      ) {
+        return trialStartSuccess(recovered[0], true);
+      }
+      throw alreadyUsedError(recovered[0]);
     }
     throw err;
   }
 }
 
 export async function validateDesktopTrial(input: TrialRequestInput) {
-  const normalized = normalizeInput(input);
+  const normalized = normalizeValidateInput(input);
   const program = await assertTrialProgram(normalized.appCode);
 
   const grant = await prisma.desktopTrialGrant.findUnique({
