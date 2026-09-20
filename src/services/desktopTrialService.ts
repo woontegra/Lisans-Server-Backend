@@ -7,18 +7,14 @@ import {
 } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import {
-  APP_CODE_KOOPPLUS_DESKTOP,
   AUTO_TRIAL_APP_CODES,
-  DESKTOP_TRIAL_DAYS,
-  DESKTOP_TRIAL_OFFLINE_GRACE_DAYS,
   DEVICE_HASH_SHA256_HEX,
-  SYSTEM_TRIAL_CUSTOMER_EMAIL,
-  SYSTEM_TRIAL_CUSTOMER_NAME,
-  SYSTEM_TRIAL_CUSTOMER_NOTES,
   SYSTEM_TRIAL_NOTES_PREFIX,
   TRIAL_ERROR_CODES,
+  getDesktopTrialProgramConfig,
+  type DesktopTrialProgramConfig,
 } from '../constants/desktopTrial';
-import { TRIAL_ALREADY_USED_MESSAGE, normalizeTrialEmail, normalizeTurkishMobile } from '../lib/trialContact';
+import { normalizeTrialEmail, normalizeTurkishMobile } from '../lib/trialContact';
 import { generateActivationPassword, generateLicenseKey } from '../utils/licenseKey';
 import { hashPassword } from '../utils/password';
 
@@ -127,9 +123,9 @@ function normalizeValidateInput(input: TrialRequestInput): NormalizedTrialInput 
   };
 }
 
-function computeTrialExpiry(from: Date): Date {
+function computeTrialExpiry(from: Date, days: number): Date {
   const expiresAt = new Date(from);
-  expiresAt.setDate(expiresAt.getDate() + DESKTOP_TRIAL_DAYS);
+  expiresAt.setDate(expiresAt.getDate() + days);
   return expiresAt;
 }
 
@@ -137,18 +133,21 @@ function isP2002(err: unknown): boolean {
   return err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002';
 }
 
-function alreadyUsedError(existing?: { status: DesktopTrialStatus; expiresAt: Date }) {
+function alreadyUsedError(
+  cfg: DesktopTrialProgramConfig,
+  existing?: { status: DesktopTrialStatus; expiresAt: Date }
+) {
   return new DesktopTrialError(
     TRIAL_ERROR_CODES.TRIAL_ALREADY_USED,
-    TRIAL_ALREADY_USED_MESSAGE,
+    cfg.alreadyUsedMessage,
     400,
     existing
-      ? trialPublicPayload({
+      ? trialPublicPayload(cfg, {
           status: existing.status,
           expiresAt: existing.expiresAt,
-          message: TRIAL_ALREADY_USED_MESSAGE,
+          message: cfg.alreadyUsedMessage,
         })
-      : { message: TRIAL_ALREADY_USED_MESSAGE }
+      : { message: cfg.alreadyUsedMessage }
   );
 }
 
@@ -237,21 +236,25 @@ async function assertTrialProgram(appCode: string) {
   return program;
 }
 
-async function ensureSystemTrialCustomer(tx: Prisma.TransactionClient) {
+async function ensureSystemTrialCustomer(
+  tx: Prisma.TransactionClient,
+  cfg: DesktopTrialProgramConfig
+) {
   // Customer.email unique değil; concurrent trial'lar duplicate SYSTEM müşteri açmasın.
-  await tx.$executeRaw`SELECT pg_advisory_xact_lock(712409, 1)`;
+  // KoopPlus lock key 712409 birebir korunur.
+  await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(${Number(cfg.advisoryLockKey)}, 1)`);
   const existing = await tx.customer.findFirst({
-    where: { email: SYSTEM_TRIAL_CUSTOMER_EMAIL },
+    where: { email: cfg.systemCustomerEmail },
     orderBy: { createdAt: 'asc' },
   });
   if (existing) return existing;
 
   return tx.customer.create({
     data: {
-      name: SYSTEM_TRIAL_CUSTOMER_NAME,
-      email: SYSTEM_TRIAL_CUSTOMER_EMAIL,
+      name: cfg.systemCustomerName,
+      email: cfg.systemCustomerEmail,
       companyName: 'Woontegra System',
-      notes: SYSTEM_TRIAL_CUSTOMER_NOTES,
+      notes: cfg.systemCustomerNotes,
     },
   });
 }
@@ -265,28 +268,35 @@ async function createUniqueTrialLicenseKey(tx: Prisma.TransactionClient): Promis
   throw new Error('Lisans anahtarı üretilemedi');
 }
 
-function trialPublicPayload(input: {
-  status: DesktopTrialStatus | 'ACTIVE' | 'EXPIRED';
-  expiresAt: Date;
-  message: string;
-}) {
+function trialPublicPayload(
+  cfg: DesktopTrialProgramConfig,
+  input: {
+    status: DesktopTrialStatus | 'ACTIVE' | 'EXPIRED';
+    expiresAt: Date;
+    message: string;
+  }
+) {
   const expiresAt = input.expiresAt.toISOString();
   return {
     trial: true as const,
-    appCode: APP_CODE_KOOPPLUS_DESKTOP,
+    appCode: cfg.appCode,
     status: input.status,
     expiresAt,
     trialExpiresAt: expiresAt,
-    offlineGraceDays: DESKTOP_TRIAL_OFFLINE_GRACE_DAYS,
+    offlineGraceDays: cfg.offlineGraceDays,
     message: input.message,
   };
 }
 
-function trialStartSuccess(grant: { status: DesktopTrialStatus; expiresAt: Date }, resumed: boolean) {
+function trialStartSuccess(
+  cfg: DesktopTrialProgramConfig,
+  grant: { status: DesktopTrialStatus; expiresAt: Date },
+  resumed: boolean
+) {
   return {
     success: true,
     resumed,
-    ...trialPublicPayload({
+    ...trialPublicPayload(cfg, {
       status: grant.status,
       expiresAt: grant.expiresAt,
       message: resumed ? 'Mevcut deneme lisansı devam ediyor' : '7 günlük deneme başlatıldı',
@@ -297,6 +307,14 @@ function trialStartSuccess(grant: { status: DesktopTrialStatus; expiresAt: Date 
 export async function startDesktopTrial(input: TrialRequestInput) {
   const prelim = normalizeValidateInput(input);
   const program = await assertTrialProgram(prelim.appCode);
+  const cfg = getDesktopTrialProgramConfig(program.appCode);
+  if (!cfg) {
+    throw new DesktopTrialError(
+      TRIAL_ERROR_CODES.TRIAL_NOT_AVAILABLE_FOR_PRODUCT,
+      'Bu ürün için otomatik deneme lisansı verilmez',
+      400
+    );
+  }
   const normalized: NormalizedTrialStartInput = {
     ...prelim,
     emailNormalized: normalizeTrialEmailOrThrow(input.email),
@@ -308,15 +326,15 @@ export async function startDesktopTrial(input: TrialRequestInput) {
   if (existingRelated.length === 1) {
     const existing = existingRelated[0];
     if (isSameContactIdentity(existing, normalized) && isActiveUnexpired(existing, now)) {
-      return trialStartSuccess(existing, true);
+      return trialStartSuccess(cfg, existing, true);
     }
-    throw alreadyUsedError(existing);
+    throw alreadyUsedError(cfg, existing);
   }
   if (existingRelated.length > 1) {
-    throw alreadyUsedError(existingRelated[0]);
+    throw alreadyUsedError(cfg, existingRelated[0]);
   }
 
-  const expiresAt = computeTrialExpiry(now);
+  const expiresAt = computeTrialExpiry(now, cfg.trialDays);
 
   try {
     const result = await prisma.$transaction(async (tx) => {
@@ -326,10 +344,10 @@ export async function startDesktopTrial(input: TrialRequestInput) {
         if (isSameContactIdentity(existing, normalized) && isActiveUnexpired(existing, now)) {
           return { grant: existing, created: false };
         }
-        throw alreadyUsedError(existing);
+        throw alreadyUsedError(cfg, existing);
       }
       if (relatedInTx.length > 1) {
-        throw alreadyUsedError(relatedInTx[0]);
+        throw alreadyUsedError(cfg, relatedInTx[0]);
       }
 
       const createdGrant = await tx.desktopTrialGrant.create({
@@ -346,7 +364,7 @@ export async function startDesktopTrial(input: TrialRequestInput) {
         },
       });
 
-      const customer = await ensureSystemTrialCustomer(tx);
+      const customer = await ensureSystemTrialCustomer(tx, cfg);
       const licenseKey = await createUniqueTrialLicenseKey(tx);
       const activationPasswordHash = await hashPassword(generateActivationPassword());
 
@@ -361,7 +379,7 @@ export async function startDesktopTrial(input: TrialRequestInput) {
           expiresAt,
           maxDevices: 1,
           status: LicenseStatus.ACTIVE,
-          notes: `${SYSTEM_TRIAL_NOTES_PREFIX}${APP_CODE_KOOPPLUS_DESKTOP}`,
+          notes: `${SYSTEM_TRIAL_NOTES_PREFIX}${cfg.appCode}`,
         },
       });
 
@@ -379,7 +397,7 @@ export async function startDesktopTrial(input: TrialRequestInput) {
         data: {
           licenseId: license.id,
           eventType: 'LICENSE_CREATED',
-          message: `Otomatik trial: ${APP_CODE_KOOPPLUS_DESKTOP}`,
+          message: `Otomatik trial: ${cfg.appCode}`,
         },
       });
 
@@ -390,7 +408,7 @@ export async function startDesktopTrial(input: TrialRequestInput) {
       return { grant, created: true };
     });
 
-    return trialStartSuccess(result.grant, !result.created);
+    return trialStartSuccess(cfg, result.grant, !result.created);
   } catch (err) {
     if (err instanceof DesktopTrialError) throw err;
     if (isP2002(err)) {
@@ -400,9 +418,9 @@ export async function startDesktopTrial(input: TrialRequestInput) {
         isSameContactIdentity(recovered[0], normalized) &&
         isActiveUnexpired(recovered[0], now)
       ) {
-        return trialStartSuccess(recovered[0], true);
+        return trialStartSuccess(cfg, recovered[0], true);
       }
-      throw alreadyUsedError(recovered[0]);
+      throw alreadyUsedError(cfg, recovered[0]);
     }
     throw err;
   }
@@ -411,6 +429,14 @@ export async function startDesktopTrial(input: TrialRequestInput) {
 export async function validateDesktopTrial(input: TrialRequestInput) {
   const normalized = normalizeValidateInput(input);
   const program = await assertTrialProgram(normalized.appCode);
+  const cfg = getDesktopTrialProgramConfig(program.appCode);
+  if (!cfg) {
+    throw new DesktopTrialError(
+      TRIAL_ERROR_CODES.TRIAL_NOT_AVAILABLE_FOR_PRODUCT,
+      'Bu ürün için otomatik deneme lisansı verilmez',
+      400
+    );
+  }
 
   const grant = await prisma.desktopTrialGrant.findUnique({
     where: {
@@ -441,7 +467,7 @@ export async function validateDesktopTrial(input: TrialRequestInput) {
       TRIAL_ERROR_CODES.TRIAL_EXPIRED,
       'Deneme süresi dolmuş',
       400,
-      trialPublicPayload({
+      trialPublicPayload(cfg, {
         status: DesktopTrialStatus.EXPIRED,
         expiresAt: grant.expiresAt,
         message: 'Deneme süresi dolmuş',
@@ -457,7 +483,7 @@ export async function validateDesktopTrial(input: TrialRequestInput) {
   return {
     success: true,
     valid: true,
-    ...trialPublicPayload({
+    ...trialPublicPayload(cfg, {
       status: DesktopTrialStatus.ACTIVE,
       expiresAt: grant.expiresAt,
       message: 'Deneme lisansı geçerli',

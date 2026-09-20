@@ -2,8 +2,10 @@ export const TRIAL_EMAIL_MAX_LENGTH = 200;
 export const TRIAL_PHONE_CANONICAL_PATTERN = /^\+905\d{9}$/;
 export const TRIAL_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export const TRIAL_ALREADY_USED_MESSAGE =
-  'Bu cihaz, e-posta adresi veya telefon numarası ile KoopPlus ücretsiz denemesi daha önce kullanılmış.';
+import { KOOPPLUS_TRIAL_ALREADY_USED_MESSAGE } from '../constants/desktopTrial';
+
+/** KoopPlus geriye uyum — mevcut client/test contract. */
+export const TRIAL_ALREADY_USED_MESSAGE = KOOPPLUS_TRIAL_ALREADY_USED_MESSAGE;
 
 export function normalizeTrialEmail(raw: unknown): string | null {
   if (typeof raw !== 'string') return null;

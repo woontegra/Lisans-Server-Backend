@@ -216,6 +216,7 @@ async function main() {
 
   const first = await json('POST', '/api/public/license/trial', trialBody);
   assert(first.status === 201 && first.data.success === true, '1) new device+email+phone gets 7-day trial');
+  assert(first.data.appCode === APP_CODE_KOOPPLUS_DESKTOP, 'KoopPlus trial payload appCode unchanged');
   assert(first.data.trial === true, 'trial flag true');
   const firstExpiresAt = first.data.expiresAt as string;
   const expiryDays = daysFromNow(firstExpiresAt);
@@ -398,39 +399,148 @@ async function main() {
     '14) legacy grant without email/phone still blocks same deviceHash'
   );
 
+  const mkEmailShared = uniqueEmail('mk-cross');
+  const mkPhoneShared = uniqueMobile(40);
+  const mkDeviceShared = sha256Hex(`mk-cross-${stamp}`);
   const mkdTrial = await json('POST', '/api/public/license/trial', {
+    appCode: 'MUVEKKIL_KASA_DESKTOP',
+    deviceHash: mkDeviceShared,
+    email: mkEmailShared,
+    phone: mkPhoneShared,
+    deviceName: 'MK Test',
+    platform: 'win32',
+    appVersion: '0.1.9',
+  });
+  assert(mkdTrial.status === 201 && mkdTrial.data.success === true, 'SERVER-01 MK /trial SUCCESS');
+  assert(mkdTrial.data.appCode === 'MUVEKKIL_KASA_DESKTOP', 'SERVER-01 MK appCode in payload');
+  assert(mkdTrial.data.trial === true && mkdTrial.data.status === 'ACTIVE', 'SERVER-01 MK ACTIVE');
+  assert(mkdTrial.data.offlineGraceDays === 0, 'SERVER-01 MK offline grace 0');
+  assert(daysFromNow(mkdTrial.data.expiresAt) > 6.5 && daysFromNow(mkdTrial.data.expiresAt) < 7.5, 'SERVER-01 MK 7 days');
+
+  const mkSameDevice = await json('POST', '/api/public/license/trial', {
+    appCode: 'MUVEKKIL_KASA_DESKTOP',
+    deviceHash: mkDeviceShared,
+    email: uniqueEmail('mk-dev2'),
+    phone: uniqueMobile(41),
+  });
+  assert(mkSameDevice.data.code === TRIAL_ERROR_CODES.TRIAL_ALREADY_USED, 'SERVER-02 MK same device RED');
+
+  const mkSameEmail = await json('POST', '/api/public/license/trial', {
+    appCode: 'MUVEKKIL_KASA_DESKTOP',
+    deviceHash: sha256Hex(`mk-email2-${stamp}`),
+    email: `  ${mkEmailShared.toUpperCase()}  `,
+    phone: uniqueMobile(42),
+  });
+  assert(mkSameEmail.data.code === TRIAL_ERROR_CODES.TRIAL_ALREADY_USED, 'SERVER-03/06 MK same email RED');
+
+  const mkSamePhone = await json('POST', '/api/public/license/trial', {
+    appCode: 'MUVEKKIL_KASA_DESKTOP',
+    deviceHash: sha256Hex(`mk-phone2-${stamp}`),
+    email: uniqueEmail('mk-phone2'),
+    phone: mkPhoneShared.replace('+90', '0'),
+  });
+  assert(mkSamePhone.data.code === TRIAL_ERROR_CODES.TRIAL_ALREADY_USED, 'SERVER-04/05 MK same phone variant RED');
+
+  const mkResume = await json('POST', '/api/public/license/trial', {
+    appCode: 'MUVEKKIL_KASA_DESKTOP',
+    deviceHash: mkDeviceShared,
+    email: mkEmailShared,
+    phone: mkPhoneShared,
+  });
+  assert(mkResume.status === 201 && mkResume.data.success === true, 'SERVER-07 MK resume SUCCESS');
+  assert(mkResume.data.resumed === true, 'SERVER-07 MK resumed flag');
+  assert(mkResume.data.expiresAt === mkdTrial.data.expiresAt, 'SERVER-07 MK same expiresAt');
+
+  const mkValidate = await json('POST', '/api/public/license/trial/validate', {
+    appCode: 'MUVEKKIL_KASA_DESKTOP',
+    deviceHash: mkDeviceShared,
+  });
+  assert(mkValidate.status === 200 && mkValidate.data.valid === true, 'SERVER-13 MK validate ACTIVE');
+  assert(mkValidate.data.appCode === 'MUVEKKIL_KASA_DESKTOP', 'SERVER-13 MK validate appCode');
+
+  const mkExpiredDevice = sha256Hex(`mk-expired-${stamp}`);
+  const mkExpiredEmail = uniqueEmail('mk-expired');
+  const mkExpiredPhone = uniqueMobile(46);
+  await prisma.desktopTrialGrant.create({
+    data: {
+      programId: mkd!.id,
+      deviceHash: mkExpiredDevice,
+      emailNormalized: mkExpiredEmail,
+      phoneNormalized: mkExpiredPhone,
+      expiresAt: new Date(Date.now() - 60_000),
+      status: 'EXPIRED',
+    },
+  });
+  const mkExpiredRetry = await json('POST', '/api/public/license/trial', {
+    appCode: 'MUVEKKIL_KASA_DESKTOP',
+    deviceHash: mkExpiredDevice,
+    email: mkExpiredEmail,
+    phone: mkExpiredPhone,
+  });
+  assert(mkExpiredRetry.data.code === TRIAL_ERROR_CODES.TRIAL_ALREADY_USED, 'SERVER-08 MK expired → new +7 DENY');
+
+  const mkExpiredValidate = await json('POST', '/api/public/license/trial/validate', {
+    appCode: 'MUVEKKIL_KASA_DESKTOP',
+    deviceHash: mkExpiredDevice,
+  });
+  assert(mkExpiredValidate.data.code === TRIAL_ERROR_CODES.TRIAL_EXPIRED, 'SERVER-14 MK /trial/validate EXPIRED');
+
+  const mkValidateWrongApp = await json('POST', '/api/public/license/trial/validate', {
+    appCode: APP_CODE_KOOPPLUS_DESKTOP,
+    deviceHash: mkDeviceShared,
+  });
+  assert(
+    mkValidateWrongApp.data.code === TRIAL_ERROR_CODES.TRIAL_NOT_FOUND,
+    'SERVER-15 MK grant + KoopPlus appCode DENY'
+  );
+  const mkValidateWrongDevice = await json('POST', '/api/public/license/trial/validate', {
     appCode: 'MUVEKKIL_KASA_DESKTOP',
     deviceHash: deviceA,
   });
   assert(
-    mkdTrial.data.code === TRIAL_ERROR_CODES.TRIAL_NOT_AVAILABLE_FOR_PRODUCT,
-    '15) MUVEKKIL_KASA_DESKTOP /trial rejected'
+    mkValidateWrongDevice.data.code === TRIAL_ERROR_CODES.TRIAL_NOT_FOUND,
+    'SERVER-15 KoopPlus device + MK appCode DENY'
+  );
+
+  const koopWithMkEmail = await json(
+    'POST',
+    '/api/public/license/trial',
+    trialReq(sha256Hex(`koop-from-mk-${stamp}`), mkEmailShared, uniqueMobile(43))
+  );
+  assert(
+    koopWithMkEmail.status === 201 && koopWithMkEmail.data.success === true,
+    'SERVER-10 MK trial email can start KoopPlus trial'
+  );
+
+  const mkWithKoopEmail = await json('POST', '/api/public/license/trial', {
+    appCode: 'MUVEKKIL_KASA_DESKTOP',
+    deviceHash: sha256Hex(`mk-from-koop-${stamp}`),
+    email: emailA,
+    phone: uniqueMobile(44),
+  });
+  assert(
+    mkWithKoopEmail.status === 201 && mkWithKoopEmail.data.success === true,
+    'SERVER-09 KoopPlus trial email can start MK trial'
   );
 
   const otherProduct = await json('POST', '/api/public/license/trial', {
     appCode: 'SIFRE_KASASI_DESKTOP',
     deviceHash: deviceA,
+    email: uniqueEmail('sifre'),
+    phone: uniqueMobile(45),
   });
   assert(
     otherProduct.data.code === TRIAL_ERROR_CODES.TRIAL_NOT_AVAILABLE_FOR_PRODUCT,
-    '15) other product /trial closed'
+    'SERVER-12 other product /trial closed'
   );
 
   if (mkd) {
-    await prisma.desktopTrialGrant.create({
-      data: {
-        programId: mkd.id,
-        deviceHash: deviceA,
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-        status: 'ACTIVE',
-      },
-    });
     const sameHashOtherProgram = await prisma.desktopTrialGrant.count({
       where: { deviceHash: deviceA },
     });
     assert(
-      sameHashOtherProgram >= 2,
-      '15) same deviceHash allowed on different programId (not global unique)'
+      sameHashOtherProgram >= 1,
+      '15) KoopPlus deviceHash row exists independently of MK grants'
     );
   }
 

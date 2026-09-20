@@ -1,12 +1,16 @@
 import {
   APP_CODE_KOOPPLUS_DESKTOP,
+  APP_CODE_MUVEKKIL_KASA_DESKTOP,
   AUTO_TRIAL_APP_CODES,
   DESKTOP_TRIAL_DAYS,
   DESKTOP_TRIAL_OFFLINE_GRACE_DAYS,
   DEVICE_HASH_SHA256_HEX,
   KOOPPLUS_PROGRAM_DEFAULTS,
+  MUVEKKIL_KASA_PROGRAM_DEFAULTS,
+  SYSTEM_TRIAL_CUSTOMER_EMAIL,
   SYSTEM_TRIAL_NOTES_PREFIX,
   TRIAL_ERROR_CODES,
+  getDesktopTrialProgramConfig,
   isSystemTrialLicenseNotes,
 } from '../src/constants/desktopTrial';
 import { config } from '../src/config';
@@ -40,15 +44,22 @@ async function main() {
   console.log('\n=== Desktop trial unit tests (no DB) ===\n');
 
   assert(AUTO_TRIAL_APP_CODES.has(APP_CODE_KOOPPLUS_DESKTOP), 'allowlist includes KOOPPLUS_DESKTOP');
-  assert(AUTO_TRIAL_APP_CODES.size === 1, 'allowlist has exactly one product');
-  assert(
-    !AUTO_TRIAL_APP_CODES.has('MUVEKKIL_KASA_DESKTOP'),
-    'MUVEKKIL_KASA_DESKTOP is not in auto-trial allowlist'
-  );
+  assert(AUTO_TRIAL_APP_CODES.has(APP_CODE_MUVEKKIL_KASA_DESKTOP), 'allowlist includes MUVEKKIL_KASA_DESKTOP');
+  assert(AUTO_TRIAL_APP_CODES.size === 2, 'allowlist has exactly two products');
   assert(
     !AUTO_TRIAL_APP_CODES.has('SIFRE_KASASI_DESKTOP'),
     'SIFRE_KASASI_DESKTOP is not in auto-trial allowlist'
   );
+  const koopCfg = getDesktopTrialProgramConfig(APP_CODE_KOOPPLUS_DESKTOP);
+  const mkCfg = getDesktopTrialProgramConfig(APP_CODE_MUVEKKIL_KASA_DESKTOP);
+  assert(!!koopCfg && koopCfg.advisoryLockKey === 712409, 'KoopPlus advisory lock key unchanged');
+  assert(koopCfg?.systemCustomerEmail === SYSTEM_TRIAL_CUSTOMER_EMAIL, 'KoopPlus system customer email unchanged');
+  assert(koopCfg?.offlineGraceDays === 0, 'KoopPlus trial offline grace 0');
+  assert(mkCfg?.offlineGraceDays === 0, 'MK trial offline grace 0');
+  assert(mkCfg?.trialDays === 7, 'MK trial days 7');
+  assert(mkCfg?.productName === MUVEKKIL_KASA_PROGRAM_DEFAULTS.name, 'MK trial product name');
+  assert(mkCfg?.appCode === APP_CODE_MUVEKKIL_KASA_DESKTOP, 'MK trial appCode');
+  assert(koopCfg?.alreadyUsedMessage.includes('KoopPlus') === true, 'KoopPlus already-used copy unchanged');
 
   assert(DESKTOP_TRIAL_DAYS === 7, 'trial length is 7 days');
   assert(DESKTOP_TRIAL_OFFLINE_GRACE_DAYS === 0, 'trial offline grace is 0');
