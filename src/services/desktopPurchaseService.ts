@@ -254,7 +254,13 @@ export async function consumeDesktopPurchaseToken(input: {
     throw new DesktopPurchaseError('PURCHASE_PRODUCT_MISMATCH', 'Bu bağlantı başka bir ürün için kullanılamaz', 400);
   }
   if (session.consumedAt && session.orderNo === orderNo && !session.paidLicenseId) {
-    session = await resumeUnfinishedConsume(session, orderNo, customerName, customerEmail, customerPhone);
+    const resumed = await resumeUnfinishedConsume(session, orderNo, customerName, customerEmail, customerPhone);
+    session = {
+      ...session,
+      paidLicenseId: resumed.paidLicenseId,
+      consumedAt: resumed.consumedAt,
+      orderNo: resumed.orderNo,
+    };
   }
   if (session.consumedAt) {
     if (session.orderNo !== orderNo || !session.paidLicenseId) {
