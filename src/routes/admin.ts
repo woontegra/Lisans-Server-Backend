@@ -17,6 +17,8 @@ import { LicenseEventType } from '@prisma/client';
 import { daysUntilExpiry, resolveLicenseStatus } from '../utils/license';
 import { paramId } from '../utils/params';
 import { parseProductType, validateSaasProgramFields } from '../utils/programDto';
+import { normalizeSaasTargetService } from '../constants/aktuerya';
+import { LicensePlatformRequiredError } from '../lib/desktopPlatform';
 
 const router = Router();
 
@@ -85,9 +87,10 @@ router.post('/programs', authMiddleware, async (req: Request, res: Response) => 
     }
 
     const productType = parseProductType(rawProductType);
+    const normalizedTarget = normalizeSaasTargetService(targetService);
     const saasValidation = validateSaasProgramFields(
       productType,
-      targetService,
+      normalizedTarget,
       saasProductCode
     );
     if (saasValidation) {
@@ -100,8 +103,7 @@ router.post('/programs', authMiddleware, async (req: Request, res: Response) => 
         name: String(name).trim(),
         description,
         productType,
-        targetService:
-          productType === ProgramProductType.SAAS ? String(targetService).trim() : null,
+        targetService: productType === ProgramProductType.SAAS ? normalizedTarget : null,
         saasProductCode:
           productType === ProgramProductType.SAAS ? String(saasProductCode).trim() : null,
         defaultLicenseDays: defaultLicenseDays ?? 365,
@@ -269,6 +271,7 @@ router.post('/licenses', authMiddleware, async (req: Request, res: Response) => 
       notes,
       sendMail,
       downloadUrl,
+      platform,
     } = req.body;
 
     let resolvedCustomerId = customerId;
@@ -298,6 +301,7 @@ router.post('/licenses', authMiddleware, async (req: Request, res: Response) => 
       licenseDays,
       maxDevices,
       notes,
+      platform,
       sendMail: !!sendMail,
       downloadUrl,
       ipAddress: getClientIp(req),
@@ -315,7 +319,8 @@ router.post('/licenses', authMiddleware, async (req: Request, res: Response) => 
   } catch (err) {
     console.error('Create license error:', err);
     const message = err instanceof Error ? err.message : 'Lisans oluşturulamadı';
-    return res.status(500).json({ error: message });
+    const status = err instanceof LicensePlatformRequiredError ? 400 : 500;
+    return res.status(status).json({ error: message });
   }
 });
 

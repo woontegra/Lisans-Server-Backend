@@ -1,5 +1,6 @@
 export const APP_CODE_KOOPPLUS_DESKTOP = 'KOOPPLUS_DESKTOP';
 export const APP_CODE_MUVEKKIL_KASA_DESKTOP = 'MUVEKKIL_KASA_DESKTOP';
+export const APP_CODE_BILIRKISI_DESKTOP = 'BILIRKISI_DESKTOP';
 
 export const DESKTOP_TRIAL_DAYS = 7;
 export const DESKTOP_TRIAL_OFFLINE_GRACE_DAYS = 0;
@@ -44,6 +45,17 @@ export const KOOPPLUS_TRIAL_ALREADY_USED_MESSAGE =
 export const MUVEKKIL_KASA_TRIAL_ALREADY_USED_MESSAGE =
   'Bu cihaz, e-posta adresi veya telefon numarası ile Müvekkil Kasa Defteri ücretsiz denemesi daha önce kullanılmış.';
 
+export const BILIRKISI_TRIAL_ALREADY_USED_MESSAGE =
+  'Bu e-posta adresi veya cihaz ile bu platform için Bilirkişi Hesap ücretsiz denemesi daha önce kullanılmış.';
+
+export const BILIRKISI_PROGRAM_DEFAULTS = {
+  appCode: APP_CODE_BILIRKISI_DESKTOP,
+  name: 'Bilirkişi Desktop',
+  description: 'Bilirkişi hesap masaüstü uygulaması',
+  defaultLicenseDays: 365,
+  defaultMaxDevices: 1,
+} as const;
+
 export const DESKTOP_TRIAL_PROGRAMS: Record<string, DesktopTrialProgramConfig> = {
   [APP_CODE_KOOPPLUS_DESKTOP]: {
     appCode: APP_CODE_KOOPPLUS_DESKTOP,
@@ -68,6 +80,18 @@ export const DESKTOP_TRIAL_PROGRAMS: Record<string, DesktopTrialProgramConfig> =
       'Sistem kaydı — otomatik Müvekkil Kasa Defteri trial lisanslarının teknik sahibi. Gerçek müşteri değildir.',
     alreadyUsedMessage: MUVEKKIL_KASA_TRIAL_ALREADY_USED_MESSAGE,
     advisoryLockKey: 712411,
+  },
+  [APP_CODE_BILIRKISI_DESKTOP]: {
+    appCode: APP_CODE_BILIRKISI_DESKTOP,
+    productName: BILIRKISI_PROGRAM_DEFAULTS.name,
+    trialDays: DESKTOP_TRIAL_DAYS,
+    offlineGraceDays: DESKTOP_TRIAL_OFFLINE_GRACE_DAYS,
+    systemCustomerEmail: 'system.bilirkisi.trial@internal.woontegra.local',
+    systemCustomerName: 'SYSTEM / Bilirkişi Desktop Trial',
+    systemCustomerNotes:
+      'Sistem kaydı — otomatik Bilirkişi Desktop trial lisanslarının teknik sahibi. Gerçek müşteri değildir.',
+    alreadyUsedMessage: BILIRKISI_TRIAL_ALREADY_USED_MESSAGE,
+    advisoryLockKey: 712413,
   },
 };
 
@@ -103,6 +127,8 @@ export const TRIAL_ERROR_CODES = {
   PROGRAM_NOT_FOUND_OR_INACTIVE: 'PROGRAM_NOT_FOUND_OR_INACTIVE',
   TRIAL_ALREADY_USED: 'TRIAL_ALREADY_USED',
   TRIAL_EXPIRED: 'TRIAL_EXPIRED',
+  INVALID_PLATFORM: 'INVALID_PLATFORM',
+  PLATFORM_MISMATCH: 'PLATFORM_MISMATCH',
   TRIAL_NOT_FOUND: 'TRIAL_NOT_FOUND',
   RATE_LIMITED: 'RATE_LIMITED',
 } as const;

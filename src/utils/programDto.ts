@@ -1,5 +1,11 @@
 import { ProgramProductType } from '@prisma/client';
 import type { Program } from '@prisma/client';
+import {
+  ALLOWED_SAAS_TARGETS,
+  SAAS_PRODUCT_CODE_AKTUERYA,
+  SAAS_TARGET_AKTUERYA,
+  normalizeSaasTargetService,
+} from '../constants/aktuerya';
 
 export type ProgramDto = {
   appCode: string;
@@ -39,7 +45,15 @@ export function validateSaasProgramFields(
   saasProductCode?: string | null
 ): string | null {
   if (productType !== ProgramProductType.SAAS) return null;
-  if (!targetService?.trim()) return 'SAAS programları için targetService zorunludur';
-  if (!saasProductCode?.trim()) return 'SAAS programları için saasProductCode zorunludur';
+  const target = normalizeSaasTargetService(targetService);
+  if (!target) return 'SAAS programları için targetService zorunludur';
+  if (!ALLOWED_SAAS_TARGETS.includes(target as (typeof ALLOWED_SAAS_TARGETS)[number])) {
+    return 'SAAS targetService yalnızca MUVEKKIL_KASA veya AKTUERYA olabilir';
+  }
+  const productCode = String(saasProductCode ?? '').trim();
+  if (!productCode) return 'SAAS programları için saasProductCode zorunludur';
+  if (target === SAAS_TARGET_AKTUERYA && productCode !== SAAS_PRODUCT_CODE_AKTUERYA) {
+    return 'AKTUERYA targetService için saasProductCode AKTUERYA_SAAS olmalıdır';
+  }
   return null;
 }

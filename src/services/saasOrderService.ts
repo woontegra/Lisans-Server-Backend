@@ -4,6 +4,7 @@ import {
   ProvisionStatus,
   type Customer,
   type License,
+  type Prisma,
   type Program,
 } from '@prisma/client';
 import { prisma } from '../lib/prisma';
@@ -15,7 +16,18 @@ import {
   SAAS_TARGET_SERVICE_MISSING,
 } from '../config/saasProviders';
 import { createLicense } from './licenseService';
+import {
+  APP_CODE_AKTUERYA_SAAS,
+  normalizeSaasTargetService,
+  SAAS_TARGET_AKTUERYA,
+  SAAS_TARGET_MUVEKKIL_KASA,
+} from '../constants/aktuerya';
 import { provisionMuvekkilKasaTenant } from './muvekkilKasaProvisioner';
+import {
+  provisionAktueryaSaas,
+  type AktueryaPlan,
+  type AktueryaProvisionPayload,
+} from './aktueryaProvisioner';
 
 export type SaasOrderInput = {
   customerId: string;
@@ -26,6 +38,9 @@ export type SaasOrderInput = {
   licenseDays?: number;
   maxDevices?: number;
   ipAddress?: string;
+  /** Yalnız AKTUERYA_SAAS. licenseDays üzerinden türetilmez. */
+  plan?: AktueryaPlan;
+  paidAt?: string;
 };
 
 export type SaasOrderResult =
@@ -41,6 +56,11 @@ export type SaasOrderResult =
       externalTenantSlug?: string | null;
       loginUrl?: string | null;
       mailSent: boolean;
+      aktueryaUserId?: string;
+      aktueryaSubscriptionId?: string;
+      provisionResult?: AktueryaProvisionPayload['result'];
+      subscriptionStartsAt?: string;
+      subscriptionExpiresAt?: string;
     }
   | {
       ok: false;
@@ -52,7 +72,20 @@ export type SaasOrderResult =
       provisionStatus: ProvisionStatus;
     };
 
-const MUVEKKIL_KASA_TARGET = 'MUVEKKIL_KASA';
+const MUVEKKIL_KASA_TARGET = SAAS_TARGET_MUVEKKIL_KASA;
+export const AKTUERYA_PLAN_REQUIRED = 'AKTUERYA_PLAN_REQUIRED';
+
+export function isAktueryaSaasProgram(program: {
+  productType: ProgramProductType;
+  appCode: string;
+  targetService?: string | null;
+}): boolean {
+  if (program.productType !== ProgramProductType.SAAS) return false;
+  return (
+    program.appCode === APP_CODE_AKTUERYA_SAAS ||
+    normalizeSaasTargetService(program.targetService) === SAAS_TARGET_AKTUERYA
+  );
+}
 
 export function isSaasProgram(program: Program): boolean {
   return program.productType === ProgramProductType.SAAS;
@@ -98,6 +131,41 @@ async function ensureWebsiteSaasLicense(
   return { license: result.license, created: true };
 }
 
+function aktueryaMetaFromRaw(raw: Prisma.JsonValue | null | undefined): AktueryaProvisionPayload | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const record = raw as Record<string, unknown>;
+  const userId = typeof record.userId === 'string' ? record.userId : '';
+  const subscriptionId = typeof record.subscriptionId === 'string' ? record.subscriptionId : '';
+  const startsAt = typeof record.startsAt === 'string' ? record.startsAt : '';
+  const expiresAt = typeof record.expiresAt === 'string' ? record.expiresAt : '';
+  const result = record.result;
+  const plan = record.plan;
+  if (!userId || !subscriptionId || !startsAt || !expiresAt) return null;
+  if (result !== 'CREATED' && result !== 'CONVERTED' && result !== 'RENEWED') return null;
+  if (plan !== 'monthly' && plan !== 'yearly') return null;
+  return {
+    idempotentReplay: record.idempotentReplay === true,
+    result,
+    userId,
+    subscriptionId,
+    plan,
+    startsAt,
+    expiresAt,
+    mailSent: record.mailSent === true,
+  };
+}
+
+function aktueryaFields(meta: AktueryaProvisionPayload | null) {
+  if (!meta) return {};
+  return {
+    aktueryaUserId: meta.userId,
+    aktueryaSubscriptionId: meta.subscriptionId,
+    provisionResult: meta.result,
+    subscriptionStartsAt: meta.startsAt,
+    subscriptionExpiresAt: meta.expiresAt,
+  };
+}
+
 function successFromDelivery(
   program: Program,
   orderNo: string,
@@ -106,6 +174,7 @@ function successFromDelivery(
     externalTenantSlug: string | null;
     loginUrl: string | null;
     mailSent: boolean;
+    rawResponse?: Prisma.JsonValue | null;
   },
   license: License,
   alreadyExists: boolean
@@ -122,6 +191,7 @@ function successFromDelivery(
     externalTenantSlug: delivery.externalTenantSlug,
     loginUrl: delivery.loginUrl,
     mailSent: delivery.mailSent,
+    ...aktueryaFields(aktueryaMetaFromRaw(delivery.rawResponse)),
   };
 }
 
@@ -168,6 +238,10 @@ export async function handleSaasWebsiteOrder(
     return failureResult(program, input.orderNo, SAAS_TARGET_SERVICE_MISSING);
   }
 
+  if (targetService === SAAS_TARGET_AKTUERYA && input.plan !== 'monthly' && input.plan !== 'yearly') {
+    return failureResult(program, input.orderNo, AKTUERYA_PLAN_REQUIRED);
+  }
+
   const productCode = program.saasProductCode?.trim();
   if (!productCode) {
     return failureResult(program, input.orderNo, SAAS_PRODUCT_CODE_MISSING);
@@ -212,6 +286,10 @@ export async function handleSaasWebsiteOrder(
         lastProvisionAttemptAt: now,
       },
     });
+  }
+
+  if (targetService === SAAS_TARGET_AKTUERYA) {
+    return completeAktueryaProvision(program, input, license, productCode, now);
   }
 
   if (targetService !== MUVEKKIL_KASA_TARGET) {
@@ -287,4 +365,80 @@ export async function handleSaasWebsiteOrder(
   });
 
   return successFromDelivery(program, input.orderNo, updated, license, data.idempotentReplay);
+}
+
+async function completeAktueryaProvision(
+  program: Program,
+  input: SaasOrderInput,
+  license: License,
+  productCode: string,
+  now: Date
+): Promise<SaasOrderResult> {
+  const plan = input.plan;
+  if (plan !== 'monthly' && plan !== 'yearly') {
+    await markProvisionFailed(input.orderNo, AKTUERYA_PLAN_REQUIRED, license.id, now);
+    return failureResult(program, input.orderNo, AKTUERYA_PLAN_REQUIRED, license);
+  }
+
+  const providerConfig = getSaasProviderConfig(SAAS_TARGET_AKTUERYA);
+  if (!providerConfig) {
+    await markProvisionFailed(input.orderNo, SAAS_PROVIDER_NOT_CONFIGURED, license.id, now);
+    return failureResult(program, input.orderNo, SAAS_PROVIDER_NOT_CONFIGURED, license);
+  }
+
+  const provision = await provisionAktueryaSaas(providerConfig, {
+    externalOrderId: input.orderNo,
+    customerName: input.customerName,
+    customerEmail: input.customerEmail,
+    customerPhone: input.customerPhone,
+    plan,
+    paidAt: input.paidAt ?? now.toISOString(),
+    productCode,
+  });
+
+  if (!provision.ok) {
+    await prisma.saasDelivery.update({
+      where: { externalOrderId: input.orderNo },
+      data: {
+        licenseId: license.id,
+        provisionStatus: ProvisionStatus.FAILED,
+        provisionError: provision.error,
+        lastProvisionAttemptAt: now,
+        rawResponse: (provision.raw ?? undefined) as Prisma.InputJsonValue | undefined,
+      },
+    });
+
+    console.error('[saas-delivery] aktuerya provision failed', {
+      orderNo: input.orderNo,
+      appCode: program.appCode,
+      error: provision.error,
+      httpStatus: provision.httpStatus ?? null,
+    });
+
+    return failureResult(program, input.orderNo, provision.error, license);
+  }
+
+  const stored: AktueryaProvisionPayload = provision.data;
+  const updated = await prisma.saasDelivery.update({
+    where: { externalOrderId: input.orderNo },
+    data: {
+      licenseId: license.id,
+      provisionStatus: ProvisionStatus.SUCCESS,
+      provisionError: null,
+      provisionedAt: now,
+      lastProvisionAttemptAt: now,
+      mailSent: stored.mailSent,
+      rawResponse: stored,
+    },
+  });
+
+  console.info('[saas-delivery] aktuerya provision success', {
+    orderNo: input.orderNo,
+    appCode: program.appCode,
+    result: stored.result,
+    idempotentReplay: stored.idempotentReplay,
+    mailSent: stored.mailSent,
+  });
+
+  return successFromDelivery(program, input.orderNo, updated, license, stored.idempotentReplay);
 }

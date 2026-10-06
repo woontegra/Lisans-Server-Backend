@@ -15,6 +15,7 @@
     "seed:dev": "tsx src/seed.ts",
     "test:api": "tsx scripts/test-api.ts",
     "test:p0-saas": "tsx scripts/test-p0-saas.ts",
+    "test:aktuerya": "tsx scripts/test-aktuerya-license.ts",
     "test:renew-license": "tsx scripts/test-renew-license.ts",
     "test:trial": "node scripts/run-trial-tests.mjs",
     "test:trial:unit": "tsx scripts/test-trial-unit.ts"

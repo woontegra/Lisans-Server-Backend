@@ -109,6 +109,8 @@ model License {
   maxDevices             Int             @default(1)
   status                 LicenseStatus   @default(ACTIVE)
   notes                  String?
+  /// BILIRKISI_DESKTOP için WINDOWS veya MACOS. Diğer ürünlerde null kalır.
+  platform               String?
   createdAt              DateTime        @default(now())
   updatedAt              DateTime        @updatedAt
   customer               Customer        @relation(fields: [customerId], references: [id])
@@ -193,12 +195,15 @@ enum DesktopTrialStatus {
   EXPIRED
 }
 
-/// KoopPlus otomatik 7 günlük demo hakkı. Satır silinmez; (programId, deviceHash) unique.
+/// Masaüstü deneme hakkı. Eski ürünlerde platformScope boştur.
+/// Bilirkişi Desktop'ta platformScope WINDOWS veya MACOS olduğu için hak platform bazındadır.
 model DesktopTrialGrant {
   id               String             @id @default(uuid())
   programId        String
   program          Program            @relation(fields: [programId], references: [id], onDelete: Restrict)
+  platformScope    String             @default("")
   deviceHash       String
+  deviceBound      Boolean            @default(true)
   deviceName       String?
   platform         String?
   appVersion       String?
@@ -211,9 +216,9 @@ model DesktopTrialGrant {
   expiresAt        DateTime
   lastValidatedAt  DateTime?
 
-  @@unique([programId, deviceHash])
-  @@unique([programId, emailNormalized])
-  @@unique([programId, phoneNormalized])
+  @@unique([programId, platformScope, deviceHash])
+  @@unique([programId, platformScope, emailNormalized])
+  @@unique([programId, platformScope, phoneNormalized])
   @@index([programId])
   @@index([expiresAt])
   @@index([licenseId])

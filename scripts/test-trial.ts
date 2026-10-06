@@ -181,6 +181,75 @@ async function main() {
   );
   assert(!!mkd, 'MUVEKKIL_KASA_DESKTOP still exists');
 
+  const bhEmail = uniqueEmail('bh-public');
+  const bhWindows = sha256Hex(`bh-public-win-${stamp}`);
+  const bhMac = sha256Hex(`bh-public-mac-${stamp}`);
+  const bhWindowsTrial = await json('POST', '/api/public/license/trial', {
+    appCode: 'BILIRKISI_DESKTOP',
+    email: bhEmail,
+    deviceHash: bhWindows,
+    platform: 'WINDOWS',
+    deviceName: 'BH Windows',
+    appVersion: '3.6.0',
+  });
+  assert(
+    bhWindowsTrial.status === 201 && bhWindowsTrial.data.success === true && bhWindowsTrial.data.platform === 'WINDOWS',
+    'BH public trial WINDOWS succeeds',
+    JSON.stringify(bhWindowsTrial.data)
+  );
+  const bhWindowsDays = daysFromNow(bhWindowsTrial.data.expiresAt as string);
+  assert(bhWindowsDays > 6.9 && bhWindowsDays < 7.1, 'BH public trial lasts 7 days', `days=${bhWindowsDays}`);
+  const bhWindowsAgain = await json('POST', '/api/public/license/trial', {
+    appCode: 'BILIRKISI_DESKTOP',
+    email: bhEmail,
+    deviceHash: sha256Hex(`bh-public-win-2-${stamp}`),
+    platform: 'WINDOWS',
+    deviceName: 'BH Windows 2',
+    appVersion: '3.6.0',
+  });
+  assert(
+    bhWindowsAgain.status === 400 && bhWindowsAgain.data.code === TRIAL_ERROR_CODES.TRIAL_ALREADY_USED,
+    'same email and WINDOWS cannot start a second BH trial',
+    JSON.stringify(bhWindowsAgain.data)
+  );
+  const bhMacTrial = await json('POST', '/api/public/license/trial', {
+    appCode: 'BILIRKISI_DESKTOP',
+    email: bhEmail,
+    deviceHash: bhMac,
+    platform: 'MACOS',
+    deviceName: 'BH Mac',
+    appVersion: '3.6.0',
+  });
+  assert(
+    bhMacTrial.status === 201 && bhMacTrial.data.success === true && bhMacTrial.data.platform === 'MACOS',
+    'BH public trial MACOS is independent from Windows',
+    JSON.stringify(bhMacTrial.data)
+  );
+  const bhMacAgain = await json('POST', '/api/public/license/trial', {
+    appCode: 'BILIRKISI_DESKTOP',
+    email: bhEmail,
+    deviceHash: sha256Hex(`bh-public-mac-2-${stamp}`),
+    platform: 'darwin',
+    deviceName: 'BH Mac 2',
+    appVersion: '3.6.0',
+  });
+  assert(
+    bhMacAgain.data.code === TRIAL_ERROR_CODES.TRIAL_ALREADY_USED,
+    'same email and MACOS cannot start a second BH trial',
+    JSON.stringify(bhMacAgain.data)
+  );
+  const bhInvalidEmail = await json('POST', '/api/public/license/trial', {
+    appCode: 'BILIRKISI_DESKTOP',
+    email: 'not-an-email',
+    deviceHash: sha256Hex(`bh-public-bad-email-${stamp}`),
+    platform: 'WINDOWS',
+  });
+  assert(
+    bhInvalidEmail.data.code === TRIAL_ERROR_CODES.INVALID_EMAIL,
+    'BH invalid email is rejected before a product-unavailable response',
+    JSON.stringify(bhInvalidEmail.data)
+  );
+
   const deviceA = sha256Hex(`koopplus-trial-a-${Date.now()}-${Math.random()}`);
   const deviceB = sha256Hex(`koopplus-trial-b-${Date.now()}-${Math.random()}`);
   const deviceC = sha256Hex(`koopplus-trial-c-${Date.now()}-${Math.random()}`);
@@ -547,6 +616,8 @@ async function main() {
   const unknown = await json('POST', '/api/public/license/trial', {
     appCode: 'UNKNOWN_APP_CODE',
     deviceHash: deviceB,
+    email: uniqueEmail('unknown-app'),
+    phone: uniqueMobile(46),
   });
   assert(
     unknown.data.code === TRIAL_ERROR_CODES.PROGRAM_NOT_FOUND_OR_INACTIVE,
@@ -624,7 +695,7 @@ async function main() {
   );
   const expiredGrantRow = await prisma.desktopTrialGrant.findUnique({
     where: {
-      programId_deviceHash: { programId: koop!.id, deviceHash: expiredDevice },
+      programId_platformScope_deviceHash: { programId: koop!.id, platformScope: '', deviceHash: expiredDevice },
     },
   });
   assert(!!expiredGrantRow, 'expired DesktopTrialGrant is not deleted');
@@ -668,7 +739,7 @@ async function main() {
 
   const trialGrant = await prisma.desktopTrialGrant.findUnique({
     where: {
-      programId_deviceHash: { programId: koop!.id, deviceHash: deviceA },
+      programId_platformScope_deviceHash: { programId: koop!.id, platformScope: '', deviceHash: deviceA },
     },
     include: { license: true },
   });
@@ -952,7 +1023,7 @@ async function main() {
 
   const grantAfterPaid = await prisma.desktopTrialGrant.findUnique({
     where: {
-      programId_deviceHash: { programId: koop!.id, deviceHash: deviceA },
+      programId_platformScope_deviceHash: { programId: koop!.id, platformScope: '', deviceHash: deviceA },
     },
   });
   assert(!!grantAfterPaid, 'DesktopTrialGrant remains after paid activation');

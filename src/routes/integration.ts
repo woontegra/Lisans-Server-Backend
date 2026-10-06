@@ -3,12 +3,21 @@ import { LicenseSource, ProgramProductType } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { integrationAuthMiddleware, getClientIp } from '../middleware/auth';
 import { createLicense, regenerateActivationPassword } from '../services/licenseService';
-import { handleSaasWebsiteOrder, isDesktopProgram } from '../services/saasOrderService';
+import {
+  AKTUERYA_PLAN_REQUIRED,
+  handleSaasWebsiteOrder,
+  isAktueryaSaasProgram,
+  isDesktopProgram,
+} from '../services/saasOrderService';
 import {
   openDesktopRenewal,
   renewWebsiteLicense,
   WebsiteRenewalError,
 } from '../services/websiteRenewalService';
+import { DesktopTrialError, startDesktopTrial } from '../services/desktopTrialService';
+import { APP_CODE_BILIRKISI_DESKTOP } from '../constants/desktopTrial';
+import { APP_CODE_AKTUERYA_DESKTOP, normalizeSaasTargetService } from '../constants/aktuerya';
+import { normalizeDesktopEntitlementPlatform } from '../lib/desktopPlatform';
 import { parseProductType, toProgramDto, validateSaasProgramFields } from '../utils/programDto';
 
 const router = Router();
@@ -112,7 +121,7 @@ router.post('/programs', integrationAuthMiddleware, async (req: Request, res: Re
         : 1;
     const isActive = req.body?.isActive !== false;
     const productType = parseProductType(req.body?.productType);
-    const targetService = req.body?.targetService ? String(req.body.targetService).trim() : null;
+    const targetService = normalizeSaasTargetService(req.body?.targetService) || null;
     const saasProductCode = req.body?.saasProductCode ? String(req.body.saasProductCode).trim() : null;
 
     if (!appCode || !APP_CODE_PATTERN.test(appCode)) {
@@ -242,6 +251,50 @@ router.post(
         return res.status(400).json({ error: 'Geçersiz veya pasif program kodu' });
       }
 
+      let desktopPlatform: string | null = null;
+      if (isDesktopProgram(program) && program.appCode === APP_CODE_AKTUERYA_DESKTOP) {
+        desktopPlatform = normalizeDesktopEntitlementPlatform(req.body?.platform);
+        if (!desktopPlatform) {
+          return res.status(400).json({
+            error: 'AKTUERYA_DESKTOP için platform WINDOWS veya MACOS olmalıdır',
+          });
+        }
+      }
+      if (isDesktopProgram(program) && program.appCode === APP_CODE_BILIRKISI_DESKTOP) {
+        desktopPlatform = normalizeDesktopEntitlementPlatform(req.body?.platform);
+        if (!desktopPlatform) {
+          return res.status(400).json({
+            error: 'BILIRKISI_DESKTOP için platform WINDOWS veya MACOS olmalıdır',
+          });
+        }
+      }
+
+      let aktueryaPlan: 'monthly' | 'yearly' | undefined;
+      let aktueryaPaidAt: string | undefined;
+      if (isAktueryaSaasProgram(program)) {
+        const plan = String(req.body?.plan ?? '')
+          .trim()
+          .toLowerCase();
+        if (plan !== 'monthly' && plan !== 'yearly') {
+          return res.status(400).json({
+            error: 'AKTUERYA_SAAS için plan monthly veya yearly olmalıdır',
+            code: AKTUERYA_PLAN_REQUIRED,
+          });
+        }
+        aktueryaPlan = plan;
+        const rawPaidAt = req.body?.paidAt;
+        if (rawPaidAt != null && String(rawPaidAt).trim() !== '') {
+          const paidAt = new Date(String(rawPaidAt));
+          if (Number.isNaN(paidAt.getTime())) {
+            return res.status(400).json({
+              error: 'paidAt geçerli bir ISO tarih olmalıdır',
+              code: 'INVALID_PAID_AT',
+            });
+          }
+          aktueryaPaidAt = paidAt.toISOString();
+        }
+      }
+
       const customer = await resolveOrCreateCustomer(
         customerName,
         customerEmail,
@@ -259,6 +312,8 @@ router.post(
           licenseDays: licenseDays ?? program.defaultLicenseDays,
           maxDevices: maxDevices ?? program.defaultMaxDevices,
           ipAddress: getClientIp(req),
+          plan: aktueryaPlan,
+          paidAt: aktueryaPaidAt,
         });
 
         if (saasResult.ok) {
@@ -274,6 +329,15 @@ router.post(
             externalTenantSlug: saasResult.externalTenantSlug ?? null,
             loginUrl: saasResult.loginUrl ?? null,
             mailSent: saasResult.mailSent,
+            ...(saasResult.aktueryaUserId
+              ? {
+                  aktueryaUserId: saasResult.aktueryaUserId,
+                  aktueryaSubscriptionId: saasResult.aktueryaSubscriptionId ?? null,
+                  provisionResult: saasResult.provisionResult ?? null,
+                  subscriptionStartsAt: saasResult.subscriptionStartsAt ?? null,
+                  subscriptionExpiresAt: saasResult.subscriptionExpiresAt ?? null,
+                }
+              : {}),
           });
         }
 
@@ -323,6 +387,7 @@ router.post(
         licenseDays: licenseDays ?? program.defaultLicenseDays,
         maxDevices: maxDevices ?? program.defaultMaxDevices,
         notes: `Website sipariş no: ${orderNo}`,
+        platform: desktopPlatform,
         sendMail: false,
         downloadUrl,
         ipAddress: getClientIp(req),
@@ -335,6 +400,7 @@ router.post(
         activationPassword: result.activationPassword,
         programName: program.name,
         expiresAt: result.license.expiresAt,
+        platform: result.license.platform,
       });
     } catch (err) {
       console.error('Website order error:', err);
@@ -414,6 +480,45 @@ router.post(
       console.error('Desktop renewal open error:', err);
       const message = err instanceof Error ? err.message : 'Yenileme oturumu açılamadı';
       return res.status(500).json({ error: message });
+    }
+  },
+);
+
+router.post(
+  '/bilirkisi-desktop-trial',
+  integrationAuthMiddleware,
+  async (req: Request, res: Response) => {
+    try {
+      const appCode = normalizeAppCode(req.body?.appCode);
+      if (appCode !== APP_CODE_BILIRKISI_DESKTOP) {
+        return res.status(400).json({
+          success: false,
+          code: 'TRIAL_NOT_AVAILABLE_FOR_PRODUCT',
+          error: 'Bu uç yalnız BILIRKISI_DESKTOP içindir',
+        });
+      }
+      const result = await startDesktopTrial({
+        appCode,
+        email: req.body?.email,
+        platform: req.body?.platform,
+        phone: req.body?.phone,
+        trustedTrialDays: req.body?.trialDays,
+        reserveOnly: true,
+        deviceName: 'website-reservation',
+      });
+      return res.status(result.resumed ? 200 : 201).json(result);
+    } catch (err) {
+      if (err instanceof DesktopTrialError) {
+        return res.status(err.httpStatus).json({
+          success: false,
+          code: err.code,
+          error: err.message,
+          message: err.message,
+          ...err.extra,
+        });
+      }
+      console.error('Bilirkişi desktop trial error:', err);
+      return res.status(500).json({ success: false, error: 'Deneme lisansı oluşturulamadı' });
     }
   },
 );

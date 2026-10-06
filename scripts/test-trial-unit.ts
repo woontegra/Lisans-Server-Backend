@@ -1,4 +1,5 @@
 import {
+  APP_CODE_BILIRKISI_DESKTOP,
   APP_CODE_KOOPPLUS_DESKTOP,
   APP_CODE_MUVEKKIL_KASA_DESKTOP,
   AUTO_TRIAL_APP_CODES,
@@ -16,6 +17,12 @@ import {
 import { config } from '../src/config';
 import { DesktopTrialError, startDesktopTrial } from '../src/services/desktopTrialService';
 import { normalizeTrialEmail, normalizeTurkishMobile } from '../src/lib/trialContact';
+import {
+  entitlementPlatformMismatch,
+  LicensePlatformRequiredError,
+  normalizeDesktopEntitlementPlatform,
+  resolvePaidLicensePlatform,
+} from '../src/lib/desktopPlatform';
 
 let passed = 0;
 let failed = 0;
@@ -45,7 +52,8 @@ async function main() {
 
   assert(AUTO_TRIAL_APP_CODES.has(APP_CODE_KOOPPLUS_DESKTOP), 'allowlist includes KOOPPLUS_DESKTOP');
   assert(AUTO_TRIAL_APP_CODES.has(APP_CODE_MUVEKKIL_KASA_DESKTOP), 'allowlist includes MUVEKKIL_KASA_DESKTOP');
-  assert(AUTO_TRIAL_APP_CODES.size === 2, 'allowlist has exactly two products');
+  assert(AUTO_TRIAL_APP_CODES.has(APP_CODE_BILIRKISI_DESKTOP), 'allowlist includes BILIRKISI_DESKTOP');
+  assert(AUTO_TRIAL_APP_CODES.size === 3, 'allowlist has KoopPlus, Müvekkil Kasa and Bilirkişi');
   assert(
     !AUTO_TRIAL_APP_CODES.has('SIFRE_KASASI_DESKTOP'),
     'SIFRE_KASASI_DESKTOP is not in auto-trial allowlist'
@@ -128,6 +136,39 @@ async function main() {
       }),
     TRIAL_ERROR_CODES.INVALID_PHONE,
     'startDesktopTrial rejects landline before DB'
+  );
+
+  const bhCfg = getDesktopTrialProgramConfig(APP_CODE_BILIRKISI_DESKTOP);
+  assert(bhCfg?.offlineGraceDays === 0, 'Bilirkişi trial offline grace is 0');
+  assert(bhCfg?.trialDays === 7, 'Bilirkişi default trial days 7');
+  assert(normalizeDesktopEntitlementPlatform('win32-x64') === 'WINDOWS', 'win32 maps to WINDOWS');
+  assert(normalizeDesktopEntitlementPlatform('darwin-arm64') === 'MACOS', 'darwin maps to MACOS');
+  assert(normalizeDesktopEntitlementPlatform('linux') === null, 'linux is not a desktop entitlement');
+  assert(entitlementPlatformMismatch(null, 'win32') === false, 'null platform does not lock legacy licenses');
+  assert(entitlementPlatformMismatch('WINDOWS', 'darwin') === true, 'Windows license rejects macOS');
+  assert(entitlementPlatformMismatch('MACOS', 'win32') === true, 'macOS license rejects Windows');
+  assert(entitlementPlatformMismatch('WINDOWS', 'windows') === false, 'Windows license accepts windows');
+  assert(resolvePaidLicensePlatform('BILIRKISI_DESKTOP', 'WINDOWS') === 'WINDOWS', 'paid BH Windows platform');
+  assert(resolvePaidLicensePlatform('BILIRKISI_DESKTOP', 'darwin') === 'MACOS', 'paid BH macOS platform');
+  assert(resolvePaidLicensePlatform('MUVEKKIL_KASA_DESKTOP', undefined) === null, 'other programs stay unscoped without platform');
+  assert(resolvePaidLicensePlatform('AKTUERYA_DESKTOP', 'MACOS') === 'MACOS', 'explicit platform still stored for other desktop apps');
+  let bhPlatformRejected = false;
+  try {
+    resolvePaidLicensePlatform('BILIRKISI_DESKTOP', undefined);
+  } catch (error) {
+    bhPlatformRejected = error instanceof LicensePlatformRequiredError;
+  }
+  assert(bhPlatformRejected, 'new BH paid license rejects a missing platform');
+  await expectCode(
+    () =>
+      startDesktopTrial({
+        appCode: APP_CODE_BILIRKISI_DESKTOP,
+        deviceHash: hex,
+        email: 'trial@example.com',
+        platform: 'linux',
+      }),
+    TRIAL_ERROR_CODES.INVALID_PLATFORM,
+    'Bilirkişi trial rejects a platform outside WINDOWS/MACOS before DB'
   );
 
   assert(normalizeTrialEmail('  SERDAR@EXAMPLE.COM  ') === 'serdar@example.com', 'email trim+lowercase');

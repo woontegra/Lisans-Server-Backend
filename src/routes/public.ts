@@ -46,7 +46,7 @@ router.post('/activate', async (req: Request, res: Response) => {
 
 router.post('/validate', async (req: Request, res: Response) => {
   try {
-    const { licenseKey, appCode, deviceHash } = req.body;
+    const { licenseKey, appCode, deviceHash, platform } = req.body;
 
     if (!licenseKey || !appCode || !deviceHash) {
       return res.status(400).json({
@@ -59,6 +59,7 @@ router.post('/validate', async (req: Request, res: Response) => {
       licenseKey,
       appCode,
       deviceHash,
+      platform,
       ipAddress: getClientIp(req),
     });
 
@@ -85,7 +86,11 @@ function sendTrialError(res: Response, err: unknown) {
 
 router.post('/trial', trialRateLimit, async (req: Request, res: Response) => {
   try {
-    const result = await startDesktopTrial(req.body);
+    const body = { ...(req.body ?? {}) } as Record<string, unknown>;
+    delete body.reserveOnly;
+    delete body.trustedTrialDays;
+    delete body.trialDays;
+    const result = await startDesktopTrial(body);
     return res.status(201).json(result);
   } catch (err) {
     return sendTrialError(res, err);

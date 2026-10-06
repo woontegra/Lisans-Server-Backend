@@ -2,7 +2,7 @@ import type { Request, Response, NextFunction } from 'express';
 import { TRIAL_ERROR_CODES } from '../constants/desktopTrial';
 
 const WINDOW_MS = 15 * 60 * 1000;
-const MAX_REQUESTS = 40;
+const MAX_REQUESTS = Number(process.env.TRIAL_RATE_LIMIT_MAX || 40);
 
 const hits = new Map<string, number[]>();
 

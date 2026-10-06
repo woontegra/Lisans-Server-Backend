@@ -9,6 +9,8 @@ import { generateActivationPassword, generateLicenseKey } from '../utils/license
 import { hashPassword } from '../utils/password';
 import { isLicenseExpired, resolveLicenseStatus } from '../utils/license';
 import { sendLicenseMail } from './mailService';
+import { entitlementPlatformMismatch, resolvePaidLicensePlatform } from '../lib/desktopPlatform';
+import { APP_CODE_BILIRKISI_DESKTOP, isSystemTrialLicenseNotes } from '../constants/desktopTrial';
 
 async function createUniqueLicenseKey(): Promise<string> {
   for (let i = 0; i < 10; i++) {
@@ -39,6 +41,8 @@ export interface CreateLicenseInput {
   licenseDays?: number;
   maxDevices?: number;
   notes?: string;
+  /** Yalnız WINDOWS veya MACOS. Boşsa null kalır; mevcut sipariş akışı göndermez. */
+  platform?: string | null;
   sendMail?: boolean;
   downloadUrl?: string;
   ipAddress?: string;
@@ -69,6 +73,8 @@ export async function createLicense(input: CreateLicenseInput): Promise<CreateLi
     expiresAt.setDate(expiresAt.getDate() + days);
   }
 
+  const platform = resolvePaidLicensePlatform(program.appCode, input.platform);
+
   const licenseKey = await createUniqueLicenseKey();
   const activationPassword = generateActivationPassword();
   const activationPasswordHash = await hashPassword(activationPassword);
@@ -84,6 +90,7 @@ export async function createLicense(input: CreateLicenseInput): Promise<CreateLi
       expiresAt,
       maxDevices: input.maxDevices ?? program.defaultMaxDevices,
       notes: input.notes,
+      platform,
       status: LicenseStatus.ACTIVE,
     },
     include: { customer: true, program: true, devices: true },
@@ -147,6 +154,20 @@ export async function activateLicense(input: ActivateInput) {
       input.ipAddress
     );
     return { success: false, message: 'Program kodu eşleşmiyor' };
+  }
+
+  if (entitlementPlatformMismatch(license.platform, input.platform)) {
+    await logLicenseEvent(
+      license.id,
+      LicenseEventType.VALIDATION_FAILED,
+      `Platform uyuşmuyor: ${input.platform ?? ''}`,
+      input.ipAddress
+    );
+    return {
+      success: false,
+      code: 'PLATFORM_MISMATCH',
+      message: 'Bu lisans bu işletim sisteminde kullanılamaz',
+    };
   }
 
   const effectiveStatus = resolveLicenseStatus(license.status, license.expiresAt);
@@ -249,6 +270,7 @@ export interface ValidateInput {
   licenseKey: string;
   appCode: string;
   deviceHash: string;
+  platform?: string;
   ipAddress?: string;
 }
 
@@ -288,6 +310,22 @@ export async function validateLicense(input: ValidateInput) {
       },
     },
   });
+
+  if (entitlementPlatformMismatch(license.platform, input.platform)) {
+    await logLicenseEvent(
+      license.id,
+      LicenseEventType.VALIDATION_FAILED,
+      `Validate platform uyuşmuyor: ${input.platform ?? ''}`,
+      input.ipAddress
+    );
+    return {
+      valid: false,
+      code: 'PLATFORM_MISMATCH',
+      licenseKey: license.licenseKey,
+      appCode: license.program.appCode,
+      message: 'Bu lisans bu işletim sisteminde kullanılamaz',
+    };
+  }
 
   if (!device || device.status !== 'ACTIVE') {
     await logLicenseEvent(
@@ -346,6 +384,10 @@ export async function validateLicense(input: ValidateInput) {
   );
 
   const { config } = await import('../config');
+  const offlineGraceDays =
+    license.program.appCode === APP_CODE_BILIRKISI_DESKTOP && isSystemTrialLicenseNotes(license.notes)
+      ? 0
+      : config.offlineGraceDays;
 
   return {
     valid: true,
@@ -354,7 +396,7 @@ export async function validateLicense(input: ValidateInput) {
     expiresAt: license.expiresAt,
     status: effectiveStatus,
     maxDevices: license.maxDevices,
-    offlineGraceDays: config.offlineGraceDays,
+    offlineGraceDays,
     message: 'Lisans geçerli',
   };
 }

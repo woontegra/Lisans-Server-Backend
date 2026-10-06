@@ -88,7 +88,10 @@ async function main() {
   );
   if (!desktopProgram) {
     desktopProgram = programs.data.find(
-      (p: { productType?: string }) => (p.productType ?? 'DESKTOP') === 'DESKTOP'
+      (p: { appCode?: string; productType?: string }) =>
+        (p.productType ?? 'DESKTOP') === 'DESKTOP' &&
+        p.appCode !== 'AKTUERYA_DESKTOP' &&
+        p.appCode !== 'BILIRKISI_DESKTOP'
     );
   }
   assert(!!desktopProgram, 'Desktop program for order-license test');

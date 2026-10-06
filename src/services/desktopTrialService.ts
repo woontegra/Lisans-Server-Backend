@@ -1,3 +1,4 @@
+import { randomBytes } from 'crypto';
 import {
   DesktopTrialStatus,
   LicenseSource,
@@ -7,6 +8,7 @@ import {
 } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import {
+  APP_CODE_BILIRKISI_DESKTOP,
   AUTO_TRIAL_APP_CODES,
   DEVICE_HASH_SHA256_HEX,
   SYSTEM_TRIAL_NOTES_PREFIX,
@@ -14,6 +16,7 @@ import {
   getDesktopTrialProgramConfig,
   type DesktopTrialProgramConfig,
 } from '../constants/desktopTrial';
+import { normalizeDesktopEntitlementPlatform } from '../lib/desktopPlatform';
 import { normalizeTrialEmail, normalizeTurkishMobile } from '../lib/trialContact';
 import { generateActivationPassword, generateLicenseKey } from '../utils/licenseKey';
 import { hashPassword } from '../utils/password';
@@ -38,6 +41,10 @@ export type TrialRequestInput = {
   appVersion?: unknown;
   email?: unknown;
   phone?: unknown;
+  /** Yalnız website entegrasyonu. Public route bu alanı siler. */
+  reserveOnly?: unknown;
+  /** Yalnız website entegrasyonu. Public route bu alanı siler. */
+  trustedTrialDays?: unknown;
 };
 
 type NormalizedTrialInput = {
@@ -45,12 +52,15 @@ type NormalizedTrialInput = {
   deviceHash: string;
   deviceName?: string;
   platform?: string;
+  platformScope: string;
   appVersion?: string;
 };
 
 type NormalizedTrialStartInput = NormalizedTrialInput & {
   emailNormalized: string;
-  phoneNormalized: string;
+  phoneNormalized: string | null;
+  reserveOnly: boolean;
+  trustedTrialDays: number | null;
 };
 
 function optionalString(value: unknown): string | undefined {
@@ -113,12 +123,40 @@ function normalizeTrialPhoneOrThrow(raw: unknown): string {
   return phone;
 }
 
+function platformScopeFor(appCode: string, platformRaw: unknown): string {
+  if (appCode !== APP_CODE_BILIRKISI_DESKTOP) return '';
+  const platform = normalizeDesktopEntitlementPlatform(platformRaw);
+  if (!platform) {
+    throw new DesktopTrialError(
+      TRIAL_ERROR_CODES.INVALID_PLATFORM,
+      'Bilirkişi Desktop denemesi için platform WINDOWS veya MACOS olmalıdır',
+      400
+    );
+  }
+  return platform;
+}
+
+function readTrustedTrialDays(raw: unknown, enabled: boolean): number | null {
+  if (!enabled || raw == null || raw === '') return null;
+  const days = typeof raw === 'number' ? raw : Number(raw);
+  if (!Number.isInteger(days) || days < 1 || days > 30) {
+    throw new DesktopTrialError(
+      TRIAL_ERROR_CODES.INVALID_REQUEST,
+      'trialDays 1 ile 30 arasında tam sayı olmalıdır',
+      400
+    );
+  }
+  return days;
+}
+
 function normalizeValidateInput(input: TrialRequestInput): NormalizedTrialInput {
+  const appCode = normalizeAppCode(input.appCode);
   return {
-    appCode: normalizeAppCode(input.appCode),
+    appCode,
     deviceHash: normalizeDeviceHash(input.deviceHash),
     deviceName: optionalString(input.deviceName),
     platform: optionalString(input.platform),
+    platformScope: platformScopeFor(appCode, input.platform),
     appVersion: optionalString(input.appVersion),
   };
 }
@@ -152,11 +190,23 @@ function alreadyUsedError(
 }
 
 function isSameContactIdentity(
-  grant: { deviceHash: string; emailNormalized: string | null; phoneNormalized: string | null },
+  grant: { deviceHash: string; emailNormalized: string | null; phoneNormalized: string | null; deviceBound: boolean },
   input: NormalizedTrialStartInput
 ): boolean {
   return (
+    grant.deviceBound &&
     grant.deviceHash === input.deviceHash &&
+    grant.emailNormalized === input.emailNormalized &&
+    grant.phoneNormalized === input.phoneNormalized
+  );
+}
+
+function isUnboundSameEmail(
+  grant: { emailNormalized: string | null; phoneNormalized: string | null; deviceBound: boolean },
+  input: NormalizedTrialStartInput
+): boolean {
+  return (
+    !grant.deviceBound &&
     grant.emailNormalized === input.emailNormalized &&
     grant.phoneNormalized === input.phoneNormalized
   );
@@ -175,30 +225,37 @@ async function findRelatedGrants(
   input: NormalizedTrialStartInput
 ) {
   const [byDevice, byEmail, byPhone] = await Promise.all([
+    input.reserveOnly
+      ? Promise.resolve(null)
+      : db.desktopTrialGrant.findUnique({
+          where: {
+            programId_platformScope_deviceHash: {
+              programId,
+              platformScope: input.platformScope,
+              deviceHash: input.deviceHash,
+            },
+          },
+        }),
     db.desktopTrialGrant.findUnique({
       where: {
-        programId_deviceHash: {
+        programId_platformScope_emailNormalized: {
           programId,
-          deviceHash: input.deviceHash,
-        },
-      },
-    }),
-    db.desktopTrialGrant.findUnique({
-      where: {
-        programId_emailNormalized: {
-          programId,
+          platformScope: input.platformScope,
           emailNormalized: input.emailNormalized,
         },
       },
     }),
-    db.desktopTrialGrant.findUnique({
-      where: {
-        programId_phoneNormalized: {
-          programId,
-          phoneNormalized: input.phoneNormalized,
-        },
-      },
-    }),
+    input.phoneNormalized
+      ? db.desktopTrialGrant.findUnique({
+          where: {
+            programId_platformScope_phoneNormalized: {
+              programId,
+              platformScope: input.platformScope,
+              phoneNormalized: input.phoneNormalized,
+            },
+          },
+        })
+      : Promise.resolve(null),
   ]);
 
   const unique = new Map<string, NonNullable<typeof byDevice>>();
@@ -290,10 +347,10 @@ function trialPublicPayload(
 
 function trialStartSuccess(
   cfg: DesktopTrialProgramConfig,
-  grant: { status: DesktopTrialStatus; expiresAt: Date },
+  grant: { id: string; status: DesktopTrialStatus; expiresAt: Date; platformScope?: string },
   resumed: boolean
 ) {
-  return {
+  const payload = {
     success: true,
     resumed,
     ...trialPublicPayload(cfg, {
@@ -302,10 +359,58 @@ function trialStartSuccess(
       message: resumed ? 'Mevcut deneme lisansı devam ediyor' : '7 günlük deneme başlatıldı',
     }),
   };
+  if (cfg.appCode !== APP_CODE_BILIRKISI_DESKTOP) return payload;
+  return {
+    ...payload,
+    grantId: grant.id,
+    platform: grant.platformScope || undefined,
+    maxDevices: 1,
+  };
+}
+
+type ExistingGrantAction = 'resume' | 'bind' | 'used';
+
+function existingGrantAction(
+  existing: {
+    deviceHash: string;
+    emailNormalized: string | null;
+    phoneNormalized: string | null;
+    deviceBound: boolean;
+    status: DesktopTrialStatus;
+    expiresAt: Date;
+  },
+  input: NormalizedTrialStartInput,
+  now: Date
+): ExistingGrantAction {
+  if (!isActiveUnexpired(existing, now)) return 'used';
+  if (isSameContactIdentity(existing, input)) return 'resume';
+  if (isUnboundSameEmail(existing, input)) return input.reserveOnly ? 'resume' : 'bind';
+  return 'used';
 }
 
 export async function startDesktopTrial(input: TrialRequestInput) {
-  const prelim = normalizeValidateInput(input);
+  const appCode = normalizeAppCode(input.appCode);
+  const reserveOnly = appCode === APP_CODE_BILIRKISI_DESKTOP && input.reserveOnly === true;
+  const prelim: NormalizedTrialInput = {
+    appCode,
+    deviceHash: reserveOnly ? randomBytes(32).toString('hex') : normalizeDeviceHash(input.deviceHash),
+    deviceName: optionalString(input.deviceName),
+    platform: optionalString(input.platform),
+    platformScope: platformScopeFor(appCode, input.platform),
+    appVersion: optionalString(input.appVersion),
+  };
+  const phoneNormalized =
+    prelim.appCode === APP_CODE_BILIRKISI_DESKTOP &&
+    (input.phone == null || (typeof input.phone === 'string' && !input.phone.trim()))
+      ? null
+      : normalizeTrialPhoneOrThrow(input.phone);
+  const normalized: NormalizedTrialStartInput = {
+    ...prelim,
+    emailNormalized: normalizeTrialEmailOrThrow(input.email),
+    phoneNormalized,
+    reserveOnly,
+    trustedTrialDays: readTrustedTrialDays(input.trustedTrialDays, reserveOnly),
+  };
   const program = await assertTrialProgram(prelim.appCode);
   const cfg = getDesktopTrialProgramConfig(program.appCode);
   if (!cfg) {
@@ -315,34 +420,61 @@ export async function startDesktopTrial(input: TrialRequestInput) {
       400
     );
   }
-  const normalized: NormalizedTrialStartInput = {
-    ...prelim,
-    emailNormalized: normalizeTrialEmailOrThrow(input.email),
-    phoneNormalized: normalizeTrialPhoneOrThrow(input.phone),
-  };
   const now = new Date();
 
   const existingRelated = await findRelatedGrants(prisma, program.id, normalized);
   if (existingRelated.length === 1) {
     const existing = existingRelated[0];
-    if (isSameContactIdentity(existing, normalized) && isActiveUnexpired(existing, now)) {
-      return trialStartSuccess(cfg, existing, true);
-    }
-    throw alreadyUsedError(cfg, existing);
-  }
-  if (existingRelated.length > 1) {
+    const action = existingGrantAction(existing, normalized, now);
+    if (action === 'resume') return trialStartSuccess(cfg, existing, true);
+    if (action !== 'bind') throw alreadyUsedError(cfg, existing);
+  } else if (existingRelated.length > 1) {
     throw alreadyUsedError(cfg, existingRelated[0]);
   }
 
-  const expiresAt = computeTrialExpiry(now, cfg.trialDays);
+  const trialDays = normalized.trustedTrialDays ?? cfg.trialDays;
+  const expiresAt = computeTrialExpiry(now, trialDays);
 
   try {
     const result = await prisma.$transaction(async (tx) => {
       const relatedInTx = await findRelatedGrants(tx, program.id, normalized);
       if (relatedInTx.length === 1) {
         const existing = relatedInTx[0];
-        if (isSameContactIdentity(existing, normalized) && isActiveUnexpired(existing, now)) {
-          return { grant: existing, created: false };
+        const action = existingGrantAction(existing, normalized, now);
+        if (action === 'resume') return { grant: existing, created: false };
+        if (action === 'bind') {
+          const taken = await tx.desktopTrialGrant.findUnique({
+            where: {
+              programId_platformScope_deviceHash: {
+                programId: program.id,
+                platformScope: normalized.platformScope,
+                deviceHash: normalized.deviceHash,
+              },
+            },
+          });
+          if (taken && taken.id !== existing.id) throw alreadyUsedError(cfg, taken);
+          const grant = await tx.desktopTrialGrant.update({
+            where: { id: existing.id },
+            data: {
+              deviceHash: normalized.deviceHash,
+              deviceBound: true,
+              deviceName: normalized.deviceName,
+              platform: normalized.platformScope || normalized.platform,
+              appVersion: normalized.appVersion,
+            },
+          });
+          if (existing.licenseId) {
+            await tx.licenseDevice.create({
+              data: {
+                licenseId: existing.licenseId,
+                deviceHash: normalized.deviceHash,
+                deviceName: normalized.deviceName,
+                platform: normalized.platformScope || normalized.platform,
+                appVersion: normalized.appVersion,
+              },
+            });
+          }
+          return { grant, created: false };
         }
         throw alreadyUsedError(cfg, existing);
       }
@@ -353,9 +485,11 @@ export async function startDesktopTrial(input: TrialRequestInput) {
       const createdGrant = await tx.desktopTrialGrant.create({
         data: {
           programId: program.id,
+          platformScope: normalized.platformScope,
           deviceHash: normalized.deviceHash,
+          deviceBound: !normalized.reserveOnly,
           deviceName: normalized.deviceName,
-          platform: normalized.platform,
+          platform: normalized.platformScope || normalized.platform,
           appVersion: normalized.appVersion,
           emailNormalized: normalized.emailNormalized,
           phoneNormalized: normalized.phoneNormalized,
@@ -380,18 +514,21 @@ export async function startDesktopTrial(input: TrialRequestInput) {
           maxDevices: 1,
           status: LicenseStatus.ACTIVE,
           notes: `${SYSTEM_TRIAL_NOTES_PREFIX}${cfg.appCode}`,
+          platform: normalized.platformScope || null,
         },
       });
 
-      await tx.licenseDevice.create({
-        data: {
-          licenseId: license.id,
-          deviceHash: normalized.deviceHash,
-          deviceName: normalized.deviceName,
-          platform: normalized.platform,
-          appVersion: normalized.appVersion,
-        },
-      });
+      if (!normalized.reserveOnly) {
+        await tx.licenseDevice.create({
+          data: {
+            licenseId: license.id,
+            deviceHash: normalized.deviceHash,
+            deviceName: normalized.deviceName,
+            platform: normalized.platformScope || normalized.platform,
+            appVersion: normalized.appVersion,
+          },
+        });
+      }
 
       await tx.licenseEvent.create({
         data: {
@@ -413,11 +550,7 @@ export async function startDesktopTrial(input: TrialRequestInput) {
     if (err instanceof DesktopTrialError) throw err;
     if (isP2002(err)) {
       const recovered = await findRelatedGrants(prisma, program.id, normalized);
-      if (
-        recovered.length === 1 &&
-        isSameContactIdentity(recovered[0], normalized) &&
-        isActiveUnexpired(recovered[0], now)
-      ) {
+      if (recovered.length === 1 && existingGrantAction(recovered[0], normalized, now) === 'resume') {
         return trialStartSuccess(cfg, recovered[0], true);
       }
       throw alreadyUsedError(cfg, recovered[0]);
@@ -440,14 +573,32 @@ export async function validateDesktopTrial(input: TrialRequestInput) {
 
   const grant = await prisma.desktopTrialGrant.findUnique({
     where: {
-      programId_deviceHash: {
+      programId_platformScope_deviceHash: {
         programId: program.id,
+        platformScope: normalized.platformScope,
         deviceHash: normalized.deviceHash,
       },
     },
   });
 
-  if (!grant) {
+  if (!grant || !grant.deviceBound) {
+    if (normalized.appCode === APP_CODE_BILIRKISI_DESKTOP) {
+      const otherPlatform = await prisma.desktopTrialGrant.findFirst({
+        where: {
+          programId: program.id,
+          deviceHash: normalized.deviceHash,
+          deviceBound: true,
+          NOT: { platformScope: normalized.platformScope },
+        },
+      });
+      if (otherPlatform) {
+        throw new DesktopTrialError(
+          TRIAL_ERROR_CODES.PLATFORM_MISMATCH,
+          'Bu deneme lisansı bu işletim sisteminde kullanılamaz',
+          400
+        );
+      }
+    }
     throw new DesktopTrialError(
       TRIAL_ERROR_CODES.TRIAL_NOT_FOUND,
       'Bu cihaz için deneme kaydı bulunamadı',
@@ -480,13 +631,17 @@ export async function validateDesktopTrial(input: TrialRequestInput) {
     data: { lastValidatedAt: now },
   });
 
+  const payload = trialPublicPayload(cfg, {
+    status: DesktopTrialStatus.ACTIVE,
+    expiresAt: grant.expiresAt,
+    message: 'Deneme lisansı geçerli',
+  });
   return {
     success: true,
     valid: true,
-    ...trialPublicPayload(cfg, {
-      status: DesktopTrialStatus.ACTIVE,
-      expiresAt: grant.expiresAt,
-      message: 'Deneme lisansı geçerli',
-    }),
+    ...payload,
+    ...(cfg.appCode === APP_CODE_BILIRKISI_DESKTOP
+      ? { platform: grant.platformScope, maxDevices: 1 }
+      : {}),
   };
 }

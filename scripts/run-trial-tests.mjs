@@ -54,6 +54,7 @@ async function main() {
     ADMIN_EMAIL: 'admin@woontegra.com',
     ADMIN_PASSWORD: 'change-me-strong-password',
     INTEGRATION_SECRET: process.env.INTEGRATION_SECRET || 'change-me-integration-secret',
+    TRIAL_RATE_LIMIT_MAX: '500',
   };
 
   console.log(`Starting ephemeral Postgres on 127.0.0.1:${PORT}`);
@@ -63,7 +64,9 @@ async function main() {
   try {
     await run('npx', ['prisma', 'migrate', 'deploy'], extraEnv);
     await run('npx', ['tsx', 'scripts/test-trial.ts'], extraEnv);
+    await run('npx', ['tsx', 'scripts/test-bilirkisi-desktop-trial.ts'], extraEnv);
     await run('npx', ['tsx', 'scripts/test-p0-saas.ts'], extraEnv);
+    await run('npx', ['tsx', 'scripts/test-aktuerya-license.ts'], extraEnv);
     await run('npx', ['tsx', 'scripts/test-renew-license.ts'], extraEnv);
   } finally {
     try {
