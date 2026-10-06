@@ -215,6 +215,7 @@ model DesktopTrialGrant {
   createdAt        DateTime           @default(now())
   expiresAt        DateTime
   lastValidatedAt  DateTime?
+  purchaseSessions DesktopPurchaseSession[]
 
   @@unique([programId, platformScope, deviceHash])
   @@unique([programId, platformScope, emailNormalized])
@@ -222,4 +223,27 @@ model DesktopTrialGrant {
   @@index([programId])
   @@index([expiresAt])
   @@index([licenseId])
+}
+
+/// Bilirkişi Desktop denemesinden ilk satın alma. Yenileme değildir.
+/// URL'de yalnız ham token taşınır; e-posta ve deviceHash burada kalır.
+model DesktopPurchaseSession {
+  id              String    @id @default(uuid())
+  tokenHash       String    @unique
+  grantId         String
+  grant           DesktopTrialGrant @relation(fields: [grantId], references: [id], onDelete: Cascade)
+  appCode         String
+  platform        String
+  deviceHash      String
+  emailNormalized String
+  purpose         String    @default("FIRST_PURCHASE")
+  expiresAt       DateTime
+  consumedAt      DateTime?
+  orderNo         String?
+  paidLicenseId   String?
+  createdAt       DateTime  @default(now())
+
+  @@index([grantId])
+  @@index([deviceHash, appCode, platform])
+  @@index([orderNo])
 }

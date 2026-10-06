@@ -10,6 +10,11 @@ import {
   startDesktopTrial,
   validateDesktopTrial,
 } from '../services/desktopTrialService';
+import {
+  DesktopPurchaseError,
+  handoffPaidDesktopLicense,
+  issueDesktopPurchaseToken,
+} from '../services/desktopPurchaseService';
 
 const router = Router();
 
@@ -94,6 +99,44 @@ router.post('/trial', trialRateLimit, async (req: Request, res: Response) => {
     return res.status(201).json(result);
   } catch (err) {
     return sendTrialError(res, err);
+  }
+});
+
+function sendPurchaseError(res: Response, err: unknown) {
+  if (err instanceof DesktopPurchaseError) {
+    return res.status(err.httpStatus).json({
+      success: false,
+      code: err.code,
+      message: err.message,
+    });
+  }
+  console.error('Desktop purchase error:', err);
+  return res.status(500).json({ success: false, message: 'Sunucu hatası' });
+}
+
+router.post('/purchase-token', trialRateLimit, async (req: Request, res: Response) => {
+  try {
+    const result = await issueDesktopPurchaseToken({
+      appCode: req.body?.appCode,
+      deviceHash: req.body?.deviceHash,
+      platform: req.body?.platform,
+    });
+    return res.status(201).json(result);
+  } catch (err) {
+    return sendPurchaseError(res, err);
+  }
+});
+
+router.post('/purchase-handoff', trialRateLimit, async (req: Request, res: Response) => {
+  try {
+    const result = await handoffPaidDesktopLicense({
+      appCode: req.body?.appCode,
+      deviceHash: req.body?.deviceHash,
+      platform: req.body?.platform,
+    });
+    return res.json(result);
+  } catch (err) {
+    return sendPurchaseError(res, err);
   }
 });
 

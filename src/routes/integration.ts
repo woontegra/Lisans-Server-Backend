@@ -15,6 +15,11 @@ import {
   WebsiteRenewalError,
 } from '../services/websiteRenewalService';
 import { DesktopTrialError, startDesktopTrial } from '../services/desktopTrialService';
+import {
+  consumeDesktopPurchaseToken,
+  DesktopPurchaseError,
+  resolveDesktopPurchaseToken,
+} from '../services/desktopPurchaseService';
 import { APP_CODE_BILIRKISI_DESKTOP } from '../constants/desktopTrial';
 import { APP_CODE_AKTUERYA_DESKTOP, normalizeSaasTargetService } from '../constants/aktuerya';
 import { normalizeDesktopEntitlementPlatform } from '../lib/desktopPlatform';
@@ -522,5 +527,38 @@ router.post(
     }
   },
 );
+
+router.post('/desktop-purchase/resolve', integrationAuthMiddleware, async (req: Request, res: Response) => {
+  try {
+    const result = await resolveDesktopPurchaseToken({ purchaseToken: req.body?.purchaseToken });
+    return res.json(result);
+  } catch (err) {
+    if (err instanceof DesktopPurchaseError) {
+      return res.status(err.httpStatus).json({ success: false, code: err.code, error: err.message });
+    }
+    console.error('Desktop purchase resolve error:', err);
+    return res.status(500).json({ success: false, error: 'Satın alma bağlantısı doğrulanamadı' });
+  }
+});
+
+router.post('/desktop-purchase/consume', integrationAuthMiddleware, async (req: Request, res: Response) => {
+  try {
+    const result = await consumeDesktopPurchaseToken({
+      purchaseToken: req.body?.purchaseToken,
+      tokenHash: req.body?.tokenHash,
+      orderNo: req.body?.orderNo,
+      customerName: req.body?.customerName,
+      customerEmail: req.body?.customerEmail,
+      customerPhone: req.body?.customerPhone,
+    });
+    return res.status(result.alreadyExists ? 200 : 201).json(result);
+  } catch (err) {
+    if (err instanceof DesktopPurchaseError) {
+      return res.status(err.httpStatus).json({ success: false, code: err.code, error: err.message });
+    }
+    console.error('Desktop purchase consume error:', err);
+    return res.status(500).json({ success: false, error: 'Ücretli lisans oluşturulamadı' });
+  }
+});
 
 export default router;

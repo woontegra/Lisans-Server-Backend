@@ -8,6 +8,13 @@ import { assertLocalDatabaseUrl } from './assertLocalTestTarget';
 import { APP_CODE_BILIRKISI_DESKTOP, TRIAL_ERROR_CODES } from '../src/constants/desktopTrial';
 import { DesktopTrialError, startDesktopTrial, validateDesktopTrial } from '../src/services/desktopTrialService';
 import { activateLicense, createLicense, validateLicense } from '../src/services/licenseService';
+import {
+  consumeDesktopPurchaseToken,
+  DesktopPurchaseError,
+  handoffPaidDesktopLicense,
+  issueDesktopPurchaseToken,
+  resolveDesktopPurchaseToken,
+} from '../src/services/desktopPurchaseService';
 
 assertLocalDatabaseUrl();
 
@@ -220,6 +227,98 @@ async function main() {
     deviceHash: mkDevice,
   });
   assert(mkValidate.valid === true && mkValidate.offlineGraceDays === 7, 'Müvekkil Kasa paid offline grace stays 7');
+
+  const purchaseEmail = `bh-purchase-${Date.now()}@example.com`;
+  const purchaseDevice = hash('purchase-device');
+  await startDesktopTrial({
+    appCode: APP_CODE_BILIRKISI_DESKTOP,
+    email: purchaseEmail,
+    deviceHash: purchaseDevice,
+    platform: 'WINDOWS',
+  });
+  const licensesBefore = await prisma.license.count();
+  let wrongProduct = false;
+  try {
+    await issueDesktopPurchaseToken({ appCode: 'MUVEKKIL_KASA_DESKTOP', deviceHash: purchaseDevice, platform: 'WINDOWS' });
+  } catch (err) {
+    wrongProduct = err instanceof DesktopPurchaseError && err.code === 'PURCHASE_PRODUCT_MISMATCH';
+  }
+  assert(wrongProduct, 'purchase token rejects another product');
+  const issued = await issueDesktopPurchaseToken({
+    appCode: APP_CODE_BILIRKISI_DESKTOP,
+    deviceHash: purchaseDevice,
+    platform: 'WINDOWS',
+  });
+  assert(!JSON.stringify(issued).includes(purchaseEmail), 'issued token payload has no email');
+  assert(!JSON.stringify(issued).includes(purchaseDevice), 'issued token payload has no device hash');
+  const resolved = await resolveDesktopPurchaseToken({ purchaseToken: issued.purchaseToken });
+  assert(resolved.platform === 'WINDOWS' && resolved.appCode === APP_CODE_BILIRKISI_DESKTOP, 'token resolves to the trial platform');
+  assert(!('emailNormalized' in resolved) && !('deviceHash' in resolved), 'resolve does not return email or device hash');
+  assert((await prisma.license.count()) === licensesBefore, 'resolve does not create a paid license');
+
+  await prisma.desktopPurchaseSession.update({
+    where: { tokenHash: createHash('sha256').update(issued.purchaseToken).digest('hex') },
+    data: { expiresAt: new Date(Date.now() - 1000) },
+  });
+  let expiredRejected = false;
+  try {
+    await resolveDesktopPurchaseToken({ purchaseToken: issued.purchaseToken });
+  } catch (err) {
+    expiredRejected = err instanceof DesktopPurchaseError && err.code === 'PURCHASE_TOKEN_EXPIRED';
+  }
+  assert(expiredRejected, 'expired token is rejected');
+
+  const fresh = await issueDesktopPurchaseToken({
+    appCode: APP_CODE_BILIRKISI_DESKTOP,
+    deviceHash: purchaseDevice,
+    platform: 'WINDOWS',
+  });
+  const consumed = await consumeDesktopPurchaseToken({
+    purchaseToken: fresh.purchaseToken,
+    orderNo: `WTBD-TEST-${Date.now()}`,
+    customerName: 'Purchase Test',
+    customerEmail: purchaseEmail,
+  });
+  assert(consumed.success === true && consumed.platform === 'WINDOWS', 'payment consume creates the Windows license');
+  const paidRow = await prisma.license.findUnique({ where: { licenseKey: consumed.licenseKey } });
+  assert(paidRow?.maxDevices === 1 && paidRow.platform === 'WINDOWS', 'paid license stays yearly platform and one device');
+  assert(!String(paidRow?.notes || '').startsWith('SYSTEM_TRIAL:'), 'paid license is not the trial row');
+  const handoff = await handoffPaidDesktopLicense({
+    appCode: APP_CODE_BILIRKISI_DESKTOP,
+    deviceHash: purchaseDevice,
+    platform: 'WINDOWS',
+  });
+  assert(handoff.licenseKey === consumed.licenseKey, 'same trial device receives the paid key');
+  const paidValidate = await validateLicense({
+    licenseKey: handoff.licenseKey,
+    appCode: APP_CODE_BILIRKISI_DESKTOP,
+    deviceHash: purchaseDevice,
+    platform: 'WINDOWS',
+  });
+  assert(paidValidate.valid === true, 'bound device validates without a new activation');
+  let usedRejected = false;
+  try {
+    await consumeDesktopPurchaseToken({
+      purchaseToken: fresh.purchaseToken,
+      orderNo: `WTBD-OTHER-${Date.now()}`,
+      customerName: 'Purchase Test',
+      customerEmail: purchaseEmail,
+    });
+  } catch (err) {
+    usedRejected = err instanceof DesktopPurchaseError && err.code === 'PURCHASE_TOKEN_USED';
+  }
+  assert(usedRejected, 'used token is rejected for a second order');
+  let otherPlatformRejected = false;
+  try {
+    await handoffPaidDesktopLicense({
+      appCode: APP_CODE_BILIRKISI_DESKTOP,
+      deviceHash: purchaseDevice,
+      platform: 'MACOS',
+    });
+  } catch (err) {
+    otherPlatformRejected = err instanceof DesktopPurchaseError && err.code === 'PAID_LICENSE_NOT_READY';
+  }
+  assert(otherPlatformRejected, 'token device cannot hand off on another platform');
 
   console.log(`\n=== ${passed} passed, ${failed} failed ===\n`);
   await prisma.$disconnect();
