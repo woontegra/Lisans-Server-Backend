@@ -46,7 +46,7 @@ export const MUVEKKIL_KASA_TRIAL_ALREADY_USED_MESSAGE =
   'Bu cihaz, e-posta adresi veya telefon numarası ile Müvekkil Kasa Defteri ücretsiz denemesi daha önce kullanılmış.';
 
 export const BILIRKISI_TRIAL_ALREADY_USED_MESSAGE =
-  'Bu e-posta adresi veya cihaz ile bu platform için Bilirkişi Hesap ücretsiz denemesi daha önce kullanılmış.';
+  'Bu e-posta adresi veya telefon numarasıyla Bilirkişi Hesap Desktop demosu daha önce kullanılmış.';
 
 export const BILIRKISI_PROGRAM_DEFAULTS = {
   appCode: APP_CODE_BILIRKISI_DESKTOP,

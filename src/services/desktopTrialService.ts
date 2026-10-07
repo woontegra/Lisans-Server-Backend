@@ -265,6 +265,26 @@ async function findRelatedGrants(
   return [...unique.values()];
 }
 
+async function assertNoOtherPlatformDesktopTrial(
+  db: Prisma.TransactionClient | typeof prisma,
+  programId: string,
+  input: NormalizedTrialStartInput,
+  cfg: DesktopTrialProgramConfig,
+) {
+  if (input.appCode !== APP_CODE_BILIRKISI_DESKTOP) return;
+  const other = await db.desktopTrialGrant.findFirst({
+    where: {
+      programId,
+      NOT: { platformScope: input.platformScope },
+      OR: [
+        { emailNormalized: input.emailNormalized },
+        ...(input.phoneNormalized ? [{ phoneNormalized: input.phoneNormalized }] : []),
+      ],
+    },
+  });
+  if (other) throw alreadyUsedError(cfg, other);
+}
+
 async function assertTrialProgram(appCode: string) {
   if (!AUTO_TRIAL_APP_CODES.has(appCode)) {
     const existing = await prisma.program.findUnique({ where: { appCode } });
@@ -432,11 +452,14 @@ export async function startDesktopTrial(input: TrialRequestInput) {
     throw alreadyUsedError(cfg, existingRelated[0]);
   }
 
+  await assertNoOtherPlatformDesktopTrial(prisma, program.id, normalized, cfg);
+
   const trialDays = normalized.trustedTrialDays ?? cfg.trialDays;
   const expiresAt = computeTrialExpiry(now, trialDays);
 
   try {
     const result = await prisma.$transaction(async (tx) => {
+      await assertNoOtherPlatformDesktopTrial(tx, program.id, normalized, cfg);
       const relatedInTx = await findRelatedGrants(tx, program.id, normalized);
       if (relatedInTx.length === 1) {
         const existing = relatedInTx[0];
