@@ -1,4 +1,6 @@
 import { PrismaClient, ProgramProductType } from '@prisma/client';
+import { ensureFirstAdmin } from './seedAdmin';
+import { ensureMissingPrograms } from './seedPrograms';
 import { hashPassword } from './utils/password';
 import { KOOPPLUS_PROGRAM_DEFAULTS } from './constants/desktopTrial';
 import {
@@ -103,42 +105,27 @@ const DEFAULT_PROGRAMS: Array<{
 ];
 
 async function main() {
-  const adminEmail = process.env.ADMIN_EMAIL;
-  const adminPassword = process.env.ADMIN_PASSWORD;
-
-  if (!adminEmail || !adminPassword) {
-    throw new Error('ADMIN_EMAIL ve ADMIN_PASSWORD ortam değişkenleri gerekli');
+  const existingAdmin = await prisma.admin.findFirst({ orderBy: { createdAt: 'asc' } });
+  const adminResult = await ensureFirstAdmin({
+    existing: existingAdmin,
+    email: process.env.ADMIN_EMAIL,
+    password: process.env.ADMIN_PASSWORD,
+    hashPassword,
+    create: (data) => prisma.admin.create({ data }),
+  });
+  if (adminResult.created) {
+    console.log(`Admin kullanıcı oluşturuldu: ${adminResult.admin.email}`);
+  } else {
+    console.log(`Mevcut yönetici korunuyor: ${adminResult.admin.email}`);
   }
 
-  const passwordHash = await hashPassword(adminPassword);
-
-  await prisma.admin.upsert({
-    where: { email: adminEmail },
-    update: { passwordHash, name: 'Woontegra Admin' },
-    create: {
-      email: adminEmail,
-      passwordHash,
-      name: 'Woontegra Admin',
-    },
+  const programResult = await ensureMissingPrograms({
+    defaults: DEFAULT_PROGRAMS,
+    findByAppCode: (appCode) => prisma.program.findUnique({ where: { appCode } }),
+    create: (data) => prisma.program.create({ data }),
   });
-
-  console.log(`Admin kullanıcı hazır: ${adminEmail}`);
-
-  for (const program of DEFAULT_PROGRAMS) {
-    await prisma.program.upsert({
-      where: { appCode: program.appCode },
-      update: {
-        name: program.name,
-        description: program.description,
-        productType: program.productType,
-        targetService: program.targetService,
-        saasProductCode: program.saasProductCode,
-        defaultLicenseDays: program.defaultLicenseDays,
-        defaultMaxDevices: program.defaultMaxDevices,
-      },
-      create: program,
-    });
-    console.log(`Program hazır: ${program.appCode}`);
+  for (const appCode of programResult.createdAppCodes) {
+    console.log(`Program oluşturuldu: ${appCode}`);
   }
 
   console.log('Seed tamamlandı.');

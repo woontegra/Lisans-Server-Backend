@@ -120,6 +120,7 @@ model License {
   saasDeliveries         SaasDelivery[]
   websiteRenewals        WebsiteLicenseRenewal[]
   desktopTrialGrants     DesktopTrialGrant[]
+  desktopAppUser         DesktopAppUser?
 
   @@index([customerId])
   @@index([programId])
@@ -216,6 +217,7 @@ model DesktopTrialGrant {
   expiresAt        DateTime
   lastValidatedAt  DateTime?
   purchaseSessions DesktopPurchaseSession[]
+  desktopAppUser   DesktopAppUser?
 
   @@unique([programId, platformScope, deviceHash])
   @@unique([programId, platformScope, emailNormalized])
@@ -246,4 +248,44 @@ model DesktopPurchaseSession {
   @@index([grantId])
   @@index([deviceHash, appCode, platform])
   @@index([orderNo])
+}
+
+/// Bilirkişi Desktop kullanıcı girişi. SaaS User tablosuna bağlı değildir.
+/// Her ücretli lisans veya demo hakkı için en fazla bir hesap.
+model DesktopAppUser {
+  id                 String   @id @default(uuid())
+  username           String   @unique
+  passwordHash       String
+  securityQuestion   String
+  securityAnswerHash String
+  emailNormalized    String
+  licenseId          String?  @unique
+  trialGrantId       String?  @unique
+  sessionVersion     Int      @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  license            License?           @relation(fields: [licenseId], references: [id], onDelete: Cascade)
+  trialGrant         DesktopTrialGrant? @relation(fields: [trialGrantId], references: [id], onDelete: Cascade)
+  codes              DesktopAuthCode[]
+
+  @@index([emailNormalized])
+}
+
+model DesktopAuthCode {
+  id              String    @id @default(uuid())
+  userId          String?
+  user            DesktopAppUser? @relation(fields: [userId], references: [id], onDelete: Cascade)
+  purpose         String
+  codeHash        String
+  emailNormalized String
+  licenseId       String?
+  trialGrantId    String?
+  expiresAt       DateTime
+  consumedAt      DateTime?
+  attemptCount    Int       @default(0)
+  createdAt       DateTime  @default(now())
+
+  @@index([licenseId, purpose])
+  @@index([trialGrantId, purpose])
+  @@index([userId, purpose])
 }

@@ -11,6 +11,37 @@ export interface LicenseMailData {
   expiresAt: Date;
 }
 
+export async function sendDesktopAuthCode(input: {
+  to: string;
+  code: string;
+  purpose: 'setup' | 'reset';
+}): Promise<{ sent: boolean; error?: string }> {
+  if (!isSmtpConfigured()) {
+    return { sent: false, error: 'SMTP yapılandırılmamış. Doğrulama kodu gönderilemedi.' };
+  }
+  const transporter = nodemailer.createTransport({
+    host: config.smtp.host,
+    port: config.smtp.port,
+    secure: config.smtp.port === 465,
+    auth: { user: config.smtp.user, pass: config.smtp.pass },
+  });
+  const title = input.purpose === 'reset' ? 'Şifre sıfırlama kodu' : 'Hesap doğrulama kodu';
+  const text = `${title}: ${input.code}\nKod 10 dakika geçerlidir ve bir kez kullanılabilir.\n\nWoontegra Yazılım`;
+  try {
+    await transporter.sendMail({
+      from: config.smtp.from,
+      to: input.to,
+      subject: `${title} | Bilirkişi Hesap Desktop`,
+      text,
+      html: `<p>${title}</p><p style="font-size:24px;letter-spacing:4px;"><strong>${input.code}</strong></p><p>Kod 10 dakika geçerlidir ve bir kez kullanılabilir.</p>`,
+    });
+    return { sent: true };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Bilinmeyen mail hatası';
+    return { sent: false, error: message };
+  }
+}
+
 export async function sendLicenseMail(
   data: LicenseMailData
 ): Promise<{ sent: boolean; error?: string }> {

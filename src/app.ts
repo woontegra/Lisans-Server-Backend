@@ -3,6 +3,7 @@ import cors from 'cors';
 import publicRoutes from './routes/public';
 import adminRoutes from './routes/admin';
 import integrationRoutes from './routes/integration';
+import desktopAuthRoutes from './routes/desktopAuth';
 
 const app = express();
 
@@ -14,6 +15,7 @@ app.get('/health', (_req, res) => {
 });
 
 app.use('/api/public/license', publicRoutes);
+app.use('/api/public/desktop-auth', desktopAuthRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/integrations/website', integrationRoutes);
 
