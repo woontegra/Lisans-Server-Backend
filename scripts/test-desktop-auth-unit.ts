@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {
   assertPassword,
   assertUsername,
+  assertSecurityQuestion,
   demoSetupAllowed,
   hashAuthCode,
   maskEmail,
@@ -52,7 +53,12 @@ check('auth code hash does not keep the raw code and session logout version fail
 
 check('username and password rules reject weak values', () => {
   assert.equal(assertUsername('Ali.01'), 'ali.01');
+  assert.equal(assertUsername('info@optimoon.com'), 'info@optimoon.com');
+  assert.equal(assertUsername('Hakan Demir'), 'hakan demir');
   assert.throws(() => assertUsername('ab'));
+  assert.throws(() => assertUsername('a/b'));
+  assert.equal(assertSecurityQuestion('Doğduğunuz şehrin adı nedir?'), 'Doğduğunuz şehrin adı nedir?');
+  assert.throws(() => assertSecurityQuestion('En sevdiğiniz yemek nedir?'));
   assert.throws(() => assertPassword('short'));
   assert.equal(assertPassword('uzun-parola'), 'uzun-parola');
 });

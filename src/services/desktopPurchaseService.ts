@@ -362,6 +362,12 @@ async function resumeUnfinishedConsume(
     });
     license = created.license;
   }
+  const { attachDemoAccountToPaidLicense } = await import('./desktopAuthService');
+  try {
+    await attachDemoAccountToPaidLicense(license.id, session.deviceHash, customerEmail);
+  } catch {
+    console.error('Demo hesabı ücretli lisansa bağlanamadı');
+  }
   await prisma.licenseDevice.upsert({
     where: { licenseId_deviceHash: { licenseId: license.id, deviceHash: session.deviceHash } },
     update: { status: 'ACTIVE', platform: session.platform },

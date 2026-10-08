@@ -12,6 +12,8 @@ import {
   AUTO_TRIAL_APP_CODES,
   DEVICE_HASH_SHA256_HEX,
   SYSTEM_TRIAL_NOTES_PREFIX,
+  DEMO_EXPIRED_USER_MESSAGE,
+  bilirkisiTrialExpiresAt,
   TRIAL_ERROR_CODES,
   getDesktopTrialProgramConfig,
   type DesktopTrialProgramConfig,
@@ -454,8 +456,12 @@ export async function startDesktopTrial(input: TrialRequestInput) {
 
   await assertNoOtherPlatformDesktopTrial(prisma, program.id, normalized, cfg);
 
-  const trialDays = normalized.trustedTrialDays ?? cfg.trialDays;
-  const expiresAt = computeTrialExpiry(now, trialDays);
+  const trialDays =
+    normalized.appCode === APP_CODE_BILIRKISI_DESKTOP ? cfg.trialDays : (normalized.trustedTrialDays ?? cfg.trialDays);
+  const expiresAt =
+    normalized.appCode === APP_CODE_BILIRKISI_DESKTOP
+      ? bilirkisiTrialExpiresAt(now)
+      : computeTrialExpiry(now, trialDays);
 
   try {
     const result = await prisma.$transaction(async (tx) => {
@@ -637,14 +643,16 @@ export async function validateDesktopTrial(input: TrialRequestInput) {
         data: { status: DesktopTrialStatus.EXPIRED },
       });
     }
+    const expiredMessage =
+      cfg.appCode === APP_CODE_BILIRKISI_DESKTOP ? DEMO_EXPIRED_USER_MESSAGE : 'Deneme süresi dolmuş';
     throw new DesktopTrialError(
       TRIAL_ERROR_CODES.TRIAL_EXPIRED,
-      'Deneme süresi dolmuş',
+      expiredMessage,
       400,
       trialPublicPayload(cfg, {
         status: DesktopTrialStatus.EXPIRED,
         expiresAt: grant.expiresAt,
-        message: 'Deneme süresi dolmuş',
+        message: expiredMessage,
       })
     );
   }

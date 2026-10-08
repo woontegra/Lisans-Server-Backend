@@ -1,7 +1,7 @@
 import { LicenseStatus } from '@prisma/client';
 import { config } from '../config';
 import { prisma } from '../lib/prisma';
-import { isSystemTrialLicenseNotes, APP_CODE_BILIRKISI_DESKTOP } from '../constants/desktopTrial';
+import { isSystemTrialLicenseNotes, APP_CODE_BILIRKISI_DESKTOP, DEMO_EXPIRED_USER_MESSAGE } from '../constants/desktopTrial';
 import { hashPassword, verifyPassword } from '../utils/password';
 import { sendDesktopAuthCode } from './mailService';
 import {
@@ -32,6 +32,57 @@ export class DesktopAuthError extends Error {
 
 function secret(): string {
   return config.jwtSecret;
+}
+
+function asRule<T>(fn: () => T): T {
+  try {
+    return fn();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Bilgiler geçersiz';
+    throw new DesktopAuthError(400, message, 'INPUT');
+  }
+}
+
+/** Demo hesabını aynı e-posta ve cihazdaki ücretli lisansa taşır. Lisans ve cihaz satırını değiştirmez. */
+export async function attachDemoAccountToPaidLicense(
+  licenseId: string,
+  deviceHash: string,
+  emailNormalized: string,
+) {
+  const license = await prisma.license.findUnique({
+    where: { id: licenseId },
+    include: { customer: true, desktopAppUser: true },
+  });
+  if (!license || isSystemTrialLicenseNotes(license.notes) || license.desktopAppUser) return license?.desktopAppUser ?? null;
+  if (license.customer.email.trim().toLowerCase() !== emailNormalized) return null;
+  const grant = await prisma.desktopTrialGrant.findFirst({
+    where: { deviceHash, emailNormalized, desktopAppUser: { isNot: null } },
+    include: { desktopAppUser: true },
+  });
+  const account = grant?.desktopAppUser;
+  if (!account || account.licenseId || account.trialGrantId !== grant?.id) return null;
+  return prisma.desktopAppUser.update({
+    where: { id: account.id },
+    data: { licenseId: license.id, trialGrantId: null },
+  });
+}
+
+async function activePaidLicenseForDemo(deviceHash: string, emailNormalized: string) {
+  const device = await prisma.licenseDevice.findFirst({
+    where: {
+      deviceHash,
+      status: 'ACTIVE',
+      license: {
+        status: LicenseStatus.ACTIVE,
+        expiresAt: { gt: new Date() },
+        customer: { email: { equals: emailNormalized, mode: 'insensitive' } },
+      },
+    },
+    include: { license: true },
+    orderBy: { createdAt: 'desc' },
+  });
+  if (!device || isSystemTrialLicenseNotes(device.license.notes)) return null;
+  return device.license;
 }
 
 function assertApp(raw: unknown): string {
@@ -179,12 +230,15 @@ export async function paidAccountStatus(body: {
   deviceHash?: unknown;
   appCode?: unknown;
 }) {
-  const { license, active } = await paidLicense(body.licenseKey, body.deviceHash, body.appCode);
+  const { license, deviceHash, active } = await paidLicense(body.licenseKey, body.deviceHash, body.appCode);
   if (!active) throw new DesktopAuthError(403, 'Lisans bu cihazda aktif değil', 'LICENSE_INACTIVE');
   if (isSystemTrialLicenseNotes(license.notes)) {
     throw new DesktopAuthError(400, 'Demo hakkı kullanıcı hesabına demo doğrulamasıyla bağlanır', 'DEMO_PATH');
   }
-  const user = await prisma.desktopAppUser.findUnique({ where: { licenseId: license.id } });
+  let user = await prisma.desktopAppUser.findUnique({ where: { licenseId: license.id } });
+  if (!user) {
+    user = await attachDemoAccountToPaidLicense(license.id, deviceHash, license.customer.email.trim().toLowerCase());
+  }
   return {
     success: true as const,
     account: user ? ('ready' as const) : ('missing' as const),
@@ -233,9 +287,9 @@ export async function createPaidAccount(body: {
     userExists: !!existing,
   });
   if (!gate.ok) throw new DesktopAuthError(400, gate.message, 'SETUP');
-  const username = assertUsername(String(body.username ?? ''));
-  const password = assertPassword(String(body.password ?? ''));
-  const security = assertSecurity(String(body.securityQuestion ?? ''), String(body.securityAnswer ?? ''));
+  const username = asRule(() => assertUsername(String(body.username ?? '')));
+  const password = asRule(() => assertPassword(String(body.password ?? '')));
+  const security = asRule(() => assertSecurity(String(body.securityQuestion ?? ''), String(body.securityAnswer ?? '')));
   const email = license.customer.email.trim().toLowerCase();
   await takeCode({
     purpose: 'ACCOUNT_SETUP',
@@ -312,9 +366,9 @@ export async function createDemoAccount(body: {
   const existing = grant ? await prisma.desktopAppUser.findUnique({ where: { trialGrantId: grant.id } }) : null;
   const gate = demoSetupAllowed({ grantActive: active && !!grant?.emailNormalized, userExists: !!existing });
   if (!gate.ok || !grant?.emailNormalized) throw new DesktopAuthError(400, gate.ok ? 'Aktif demo hakkı yok' : gate.message, 'SETUP');
-  const username = assertUsername(String(body.username ?? ''));
-  const password = assertPassword(String(body.password ?? ''));
-  const security = assertSecurity(String(body.securityQuestion ?? ''), String(body.securityAnswer ?? ''));
+  const username = asRule(() => assertUsername(String(body.username ?? '')));
+  const password = asRule(() => assertPassword(String(body.password ?? '')));
+  const security = asRule(() => assertSecurity(String(body.securityQuestion ?? ''), String(body.securityAnswer ?? '')));
   await takeCode({
     purpose: 'ACCOUNT_SETUP',
     code: String(body.code ?? ''),
@@ -343,7 +397,7 @@ export async function createDemoAccount(body: {
 }
 
 export async function loginDesktopUser(body: { username?: unknown; password?: unknown }) {
-  const username = assertUsername(String(body.username ?? ''));
+  const username = asRule(() => assertUsername(String(body.username ?? '')));
   const password = String(body.password ?? '');
   const user = await prisma.desktopAppUser.findUnique({
     where: { username },
@@ -352,13 +406,21 @@ export async function loginDesktopUser(body: { username?: unknown; password?: un
   if (!user || !(await verifyPassword(password, user.passwordHash))) {
     throw new DesktopAuthError(401, 'Kullanıcı adı veya parola hatalı', 'LOGIN');
   }
-  if (user.license) {
-    if (user.license.status !== LicenseStatus.ACTIVE || user.license.expiresAt.getTime() <= Date.now()) {
+  let license = user.license;
+  if (!license && user.trialGrant) {
+    const paid = await activePaidLicenseForDemo(user.trialGrant.deviceHash, user.emailNormalized);
+    if (paid) {
+      const moved = await attachDemoAccountToPaidLicense(paid.id, user.trialGrant.deviceHash, user.emailNormalized);
+      if (moved) license = paid;
+    }
+  }
+  if (license) {
+    if (license.status !== LicenseStatus.ACTIVE || license.expiresAt.getTime() <= Date.now()) {
       throw new DesktopAuthError(403, 'Lisans süresi dolmuş veya pasif', 'LICENSE_EXPIRED');
     }
   } else if (user.trialGrant) {
     if (user.trialGrant.status !== 'ACTIVE' || user.trialGrant.expiresAt.getTime() <= Date.now()) {
-      throw new DesktopAuthError(403, 'Demo süresi dolmuş', 'DEMO_EXPIRED');
+      throw new DesktopAuthError(403, DEMO_EXPIRED_USER_MESSAGE, 'DEMO_EXPIRED');
     }
   } else {
     throw new DesktopAuthError(403, 'Hesaba bağlı lisans yok', 'LICENSE');
@@ -393,9 +455,9 @@ export async function readSessionUser(token: string) {
 }
 
 export async function startPasswordReset(body: { username?: unknown }) {
-  const username = assertUsername(String(body.username ?? ''));
+  const username = asRule(() => assertUsername(String(body.username ?? '')));
   const user = await prisma.desktopAppUser.findUnique({ where: { username } });
-  if (!user) throw new DesktopAuthError(404, 'Kullanıcı bulunamadı', 'USER');
+  if (!user) throw new DesktopAuthError(404, 'Bu kullanıcı adıyla hesap bulunamadı', 'USER');
   await issueCode({
     purpose: 'PASSWORD_RESET',
     email: user.emailNormalized,
@@ -410,14 +472,14 @@ export async function completePasswordReset(body: {
   securityAnswer?: unknown;
   newPassword?: unknown;
 }) {
-  const username = assertUsername(String(body.username ?? ''));
+  const username = asRule(() => assertUsername(String(body.username ?? '')));
   const user = await prisma.desktopAppUser.findUnique({ where: { username } });
-  if (!user) throw new DesktopAuthError(404, 'Kullanıcı bulunamadı', 'USER');
+  if (!user) throw new DesktopAuthError(404, 'Bu kullanıcı adıyla hesap bulunamadı', 'USER');
   const answer = String(body.securityAnswer ?? '').trim().toLowerCase();
   if (!(await verifyPassword(answer, user.securityAnswerHash))) {
     throw new DesktopAuthError(400, 'Güvenlik cevabı hatalı', 'SECURITY');
   }
-  const password = assertPassword(String(body.newPassword ?? ''));
+  const password = asRule(() => assertPassword(String(body.newPassword ?? '')));
   await takeCode({
     purpose: 'PASSWORD_RESET',
     code: String(body.code ?? ''),

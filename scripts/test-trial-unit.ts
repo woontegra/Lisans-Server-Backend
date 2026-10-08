@@ -4,6 +4,7 @@ import {
   APP_CODE_MUVEKKIL_KASA_DESKTOP,
   AUTO_TRIAL_APP_CODES,
   DESKTOP_TRIAL_DAYS,
+  bilirkisiTrialExpiresAt,
   DESKTOP_TRIAL_OFFLINE_GRACE_DAYS,
   DEVICE_HASH_SHA256_HEX,
   KOOPPLUS_PROGRAM_DEFAULTS,
@@ -141,6 +142,10 @@ async function main() {
   const bhCfg = getDesktopTrialProgramConfig(APP_CODE_BILIRKISI_DESKTOP);
   assert(bhCfg?.offlineGraceDays === 0, 'Bilirkişi trial offline grace is 0');
   assert(bhCfg?.trialDays === 7, 'Bilirkişi default trial days 7');
+  const trialStart = new Date('2026-10-08T10:00:00.000Z');
+  const trialEnd = bilirkisiTrialExpiresAt(trialStart);
+  assert(trialEnd.getTime() - trialStart.getTime() === 7 * 24 * 60 * 60 * 1000, 'Bilirkişi trial is exactly 7x24 hours');
+  assert(trialEnd.toISOString() === '2026-10-15T10:00:00.000Z', '8 October 10:00 start ends 15 October 10:00');
   assert(normalizeDesktopEntitlementPlatform('win32-x64') === 'WINDOWS', 'win32 maps to WINDOWS');
   assert(normalizeDesktopEntitlementPlatform('darwin-arm64') === 'MACOS', 'darwin maps to MACOS');
   assert(normalizeDesktopEntitlementPlatform('linux') === null, 'linux is not a desktop entitlement');

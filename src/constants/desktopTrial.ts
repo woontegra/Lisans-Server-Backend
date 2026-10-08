@@ -3,6 +3,14 @@ export const APP_CODE_MUVEKKIL_KASA_DESKTOP = 'MUVEKKIL_KASA_DESKTOP';
 export const APP_CODE_BILIRKISI_DESKTOP = 'BILIRKISI_DESKTOP';
 
 export const DESKTOP_TRIAL_DAYS = 7;
+export const BILIRKISI_TRIAL_DURATION_MS = DESKTOP_TRIAL_DAYS * 24 * 60 * 60 * 1000;
+export const DEMO_EXPIRED_USER_MESSAGE =
+  'Deneme süreniz sona ermiştir. Devam etmek için lisans satın alabilirsiniz.';
+
+/** Takvim günü veya saat dilimi kaydırmadan tam 7×24 saat. */
+export function bilirkisiTrialExpiresAt(from: Date): Date {
+  return new Date(from.getTime() + BILIRKISI_TRIAL_DURATION_MS);
+}
 export const DESKTOP_TRIAL_OFFLINE_GRACE_DAYS = 0;
 
 /**

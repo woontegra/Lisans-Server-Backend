@@ -3,16 +3,31 @@ import crypto from 'crypto';
 export const AUTH_CODE_TTL_MS = 10 * 60 * 1000;
 export const AUTH_CODE_MAX_ATTEMPTS = 5;
 
+export const DESKTOP_SECURITY_QUESTIONS = [
+  'Annenizin kızlık soyadı nedir?',
+  'İlk evcil hayvanınızın adı nedir?',
+  'İlkokul öğretmeninizin adı nedir?',
+  'Doğduğunuz şehrin adı nedir?',
+] as const;
+
 export function normalizeUsername(raw: string): string {
-  return raw.trim().toLowerCase();
+  return raw.trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
 export function assertUsername(raw: string): string {
   const username = normalizeUsername(raw);
-  if (!/^[a-z0-9._-]{3,32}$/.test(username)) {
-    throw new Error('Kullanıcı adı 3-32 karakter olmalı ve yalnız harf, rakam, nokta, alt çizgi veya tire içermelidir.');
+  if (username.length < 3 || username.length > 80 || !/^[\p{L}\p{N}._@+-]+(?: [\p{L}\p{N}._@+-]+)*$/u.test(username)) {
+    throw new Error('Kullanıcı adı 3-80 karakter olmalı. Ad soyad, e-posta veya normal kullanıcı adı yazabilirsiniz.');
   }
   return username;
+}
+
+export function assertSecurityQuestion(raw: string): string {
+  const question = raw.trim();
+  if (!(DESKTOP_SECURITY_QUESTIONS as readonly string[]).includes(question)) {
+    throw new Error('Güvenlik sorusu listeden seçilmelidir.');
+  }
+  return question;
 }
 
 export function assertPassword(raw: string): string {
@@ -24,11 +39,8 @@ export function assertPassword(raw: string): string {
 }
 
 export function assertSecurity(questionRaw: string, answerRaw: string): { question: string; answer: string } {
-  const question = questionRaw.trim();
+  const question = assertSecurityQuestion(questionRaw);
   const answer = answerRaw.trim().toLowerCase();
-  if (question.length < 4 || question.length > 160) {
-    throw new Error('Güvenlik sorusu 4-160 karakter olmalıdır.');
-  }
   if (answer.length < 2 || answer.length > 80) {
     throw new Error('Güvenlik cevabı 2-80 karakter olmalıdır.');
   }
