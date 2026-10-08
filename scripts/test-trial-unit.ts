@@ -175,6 +175,30 @@ async function main() {
     TRIAL_ERROR_CODES.INVALID_PLATFORM,
     'Bilirkişi trial rejects a platform outside WINDOWS/MACOS before DB'
   );
+  await expectCode(
+    () =>
+      startDesktopTrial({
+        appCode: APP_CODE_BILIRKISI_DESKTOP,
+        email: 'trial@example.com',
+        phone: '+905321234567',
+        platform: 'WINDOWS',
+        reserveOnly: true,
+        trustedTrialDays: 5,
+      }),
+    TRIAL_ERROR_CODES.TRIAL_STARTS_IN_APP,
+    'website reservation does not create a Bilirkişi trial or start its clock'
+  );
+  await expectCode(
+    () =>
+      startDesktopTrial({
+        appCode: APP_CODE_BILIRKISI_DESKTOP,
+        deviceHash: hex,
+        email: 'trial@example.com',
+        platform: 'WINDOWS',
+      }),
+    TRIAL_ERROR_CODES.INVALID_PHONE,
+    'Bilirkişi desktop trial requires a Turkish mobile before DB'
+  );
 
   assert(normalizeTrialEmail('  SERDAR@EXAMPLE.COM  ') === 'serdar@example.com', 'email trim+lowercase');
   assert(normalizeTurkishMobile('0532 123 45 67') === '+905321234567', 'TR mobile 0532…');

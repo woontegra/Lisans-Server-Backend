@@ -412,7 +412,14 @@ function existingGrantAction(
 
 export async function startDesktopTrial(input: TrialRequestInput) {
   const appCode = normalizeAppCode(input.appCode);
-  const reserveOnly = appCode === APP_CODE_BILIRKISI_DESKTOP && input.reserveOnly === true;
+  if (appCode === APP_CODE_BILIRKISI_DESKTOP && input.reserveOnly === true) {
+    throw new DesktopTrialError(
+      TRIAL_ERROR_CODES.TRIAL_STARTS_IN_APP,
+      'Bilirkişi Hesap demosu programın içinden başlatılır.',
+      400,
+    );
+  }
+  const reserveOnly = false;
   const prelim: NormalizedTrialInput = {
     appCode,
     deviceHash: reserveOnly ? randomBytes(32).toString('hex') : normalizeDeviceHash(input.deviceHash),
@@ -421,11 +428,7 @@ export async function startDesktopTrial(input: TrialRequestInput) {
     platformScope: platformScopeFor(appCode, input.platform),
     appVersion: optionalString(input.appVersion),
   };
-  const phoneNormalized =
-    prelim.appCode === APP_CODE_BILIRKISI_DESKTOP &&
-    (input.phone == null || (typeof input.phone === 'string' && !input.phone.trim()))
-      ? null
-      : normalizeTrialPhoneOrThrow(input.phone);
+  const phoneNormalized = normalizeTrialPhoneOrThrow(input.phone);
   const normalized: NormalizedTrialStartInput = {
     ...prelim,
     emailNormalized: normalizeTrialEmailOrThrow(input.email),
