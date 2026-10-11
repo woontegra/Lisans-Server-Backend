@@ -222,7 +222,59 @@ async function main() {
   assert.ok(open.data.customerName);
   assert.equal(open.data.customerNumber ?? null, null);
   assert.ok(open.data.expiresAt);
+  assert.equal(open.data.platform, null, 'platform bilgisi olmayan lisansta platform varsayılmaz');
   console.log('  ✓ desktop-renewal/open');
+
+  // desktop-renewal/open platform: lisans platformu önceliklidir, yoksa cihaz platformu
+  const platformKeys: string[] = [];
+  {
+    const openFor = async (input: { platform?: string; devicePlatform: string }) => {
+      const res = await json(
+        'POST',
+        '/api/integrations/website/order-license',
+        {
+          customerName: 'Renew Platform Test',
+          customerEmail: `renew-platform-${Date.now()}-${platformKeys.length}@example.invalid`,
+          appCode,
+          orderNo: `TEST-RENEW-PLATFORM-${Date.now()}-${platformKeys.length}`,
+          licenseDays: 30,
+          ...(input.platform ? { platform: input.platform } : {}),
+        },
+        integrationHeaders,
+      );
+      assert.equal(res.status, 201);
+      const key = res.data.licenseKey as string;
+      platformKeys.push(key);
+      const dev = `renew-platform-device-${Date.now()}-${platformKeys.length}`;
+      const act = await json('POST', '/api/public/license/activate', {
+        licenseKey: key,
+        activationPassword: res.data.activationPassword,
+        appCode,
+        deviceHash: dev,
+        platform: input.devicePlatform,
+      });
+      assert.equal(act.status, 200, JSON.stringify(act.data));
+      return json(
+        'POST',
+        '/api/integrations/website/desktop-renewal/open',
+        { licenseKey: key, deviceHash: dev, appCode },
+        integrationHeaders,
+      );
+    };
+    const mac = await openFor({ platform: 'MACOS', devicePlatform: 'darwin-arm64' });
+    assert.equal(mac.status, 200);
+    assert.equal(mac.data.platform, 'MACOS');
+    const win = await openFor({ platform: 'WINDOWS', devicePlatform: 'win32-x64' });
+    assert.equal(win.status, 200);
+    assert.equal(win.data.platform, 'WINDOWS');
+    const legacyWin = await openFor({ devicePlatform: 'win32-x64' });
+    assert.equal(legacyWin.status, 200);
+    assert.equal(legacyWin.data.platform, 'WINDOWS', 'eski lisansta cihaz platformu kullanılır');
+    const legacyMac = await openFor({ devicePlatform: 'darwin-arm64' });
+    assert.equal(legacyMac.status, 200);
+    assert.equal(legacyMac.data.platform, 'MACOS');
+    console.log('  ✓ desktop-renewal/open platform (lisans > cihaz > null)');
+  }
 
   // B) expired license + 365 from today
   const expiredOrderNo = `TEST-RENEW-EXPIRED-${Date.now()}`;
@@ -283,7 +335,7 @@ async function main() {
   });
   await prisma.license.deleteMany({
     where: {
-      licenseKey: { in: [licenseKey, expiredKey] },
+      licenseKey: { in: [licenseKey, expiredKey, ...platformKeys] },
     },
   });
 

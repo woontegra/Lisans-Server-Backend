@@ -9,6 +9,7 @@ import { prisma } from '../lib/prisma';
 import { logLicenseEvent } from './licenseService';
 import { isDesktopProgram } from './saasOrderService';
 import { isSystemTrialLicenseNotes } from '../constants/desktopTrial';
+import { normalizeDesktopEntitlementPlatform, type DesktopEntitlementPlatform } from '../lib/desktopPlatform';
 
 export class WebsiteRenewalError extends Error {
   constructor(
@@ -228,6 +229,8 @@ export type DesktopRenewalOpenResult = {
   customerNumber: string | null;
   customerName: string;
   expiresAt: string;
+  /** Lisans platformu yoksa yenilenen cihazın platformu; ikisi de bilinmiyorsa null. */
+  platform: DesktopEntitlementPlatform | null;
 };
 
 export async function openDesktopRenewal(
@@ -293,5 +296,8 @@ export async function openDesktopRenewal(
     customerNumber: null,
     customerName: license.customer.name,
     expiresAt: license.expiresAt.toISOString(),
+    platform:
+      normalizeDesktopEntitlementPlatform(license.platform) ??
+      normalizeDesktopEntitlementPlatform(device.platform),
   };
 }
