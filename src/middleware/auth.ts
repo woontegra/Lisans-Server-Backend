@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { config } from '../config';
+import { prisma } from '../lib/prisma';
 
 export interface AuthPayload {
   adminId: string;
@@ -28,6 +29,23 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction) 
     next();
   } catch {
     return res.status(401).json({ error: 'Geçersiz veya süresi dolmuş token' });
+  }
+}
+
+/** authMiddleware'den sonra kullanılır. Admin kaydı DB'den okunur; token içeriğine güvenilmez. */
+export async function superAdminMiddleware(req: Request, res: Response, next: NextFunction) {
+  try {
+    const admin = req.admin
+      ? await prisma.admin.findUnique({ where: { id: req.admin.adminId }, select: { email: true } })
+      : null;
+    if (!admin || !config.superAdminEmails.includes(admin.email.trim().toLowerCase())) {
+      return res.status(403).json({ error: 'Bu işlem için SUPER_ADMIN yetkisi gerekli' });
+    }
+    req.admin = { ...req.admin!, email: admin.email };
+    return next();
+  } catch (err) {
+    console.error('Super admin check error:', err);
+    return res.status(500).json({ error: 'Sunucu hatası' });
   }
 }
 

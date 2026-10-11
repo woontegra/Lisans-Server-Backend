@@ -3,7 +3,11 @@ import jwt from 'jsonwebtoken';
 import { LicenseSource, LicenseStatus, ProgramProductType } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { config } from '../config';
-import { authMiddleware, getClientIp } from '../middleware/auth';
+import { authMiddleware, getClientIp, superAdminMiddleware } from '../middleware/auth';
+import {
+  DesktopTrialTestResetError,
+  resetDesktopTrialTestIdentity,
+} from '../services/desktopTrialTestReset';
 import { verifyPassword } from '../utils/password';
 import {
   createLicense,
@@ -466,5 +470,28 @@ router.post('/licenses/:id/send-mail', authMiddleware, async (req: Request, res:
     return res.status(500).json({ error: 'Mail gönderilemedi' });
   }
 });
+
+router.post(
+  '/desktop-trials/test-identity/reset',
+  authMiddleware,
+  superAdminMiddleware,
+  async (req: Request, res: Response) => {
+    try {
+      const result = await resetDesktopTrialTestIdentity({
+        appCode: req.body?.appCode,
+        dryRun: req.body?.dryRun === true,
+        adminEmail: req.admin!.email,
+        ipAddress: getClientIp(req),
+      });
+      return res.json(result);
+    } catch (err) {
+      if (err instanceof DesktopTrialTestResetError) {
+        return res.status(err.httpStatus).json({ code: err.code, error: err.message });
+      }
+      console.error('Desktop trial test reset error:', err);
+      return res.status(500).json({ error: 'Demo test sıfırlaması yapılamadı' });
+    }
+  }
+);
 
 export default router;

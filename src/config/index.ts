@@ -11,6 +11,11 @@ export const config = {
   adminEmail: process.env.ADMIN_EMAIL || 'admin@woontegra.com',
   adminPassword: process.env.ADMIN_PASSWORD || 'admin123',
   integrationSecret: process.env.INTEGRATION_SECRET || '',
+  /** Virgülle ayrılmış SUPER_ADMIN e-postaları. Boşsa SUPER_ADMIN işlemleri kapalıdır. */
+  superAdminEmails: (process.env.SUPER_ADMIN_EMAILS || '')
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean),
   smtp: {
     host: process.env.SMTP_HOST || '',
     port: parseInt(process.env.SMTP_PORT || '587', 10),

@@ -124,6 +124,26 @@ export function isSystemTrialLicenseNotes(notes: string | null | undefined): boo
   return typeof notes === 'string' && notes.startsWith(SYSTEM_TRIAL_NOTES_PREFIX);
 }
 
+/**
+ * Woontegra demo test kimliği. Public /trial bu kimliğe muafiyet tanımaz;
+ * yalnız SUPER_ADMIN sıfırlaması bu kimliğin eski demosunu kapatıp hakkı yeniler.
+ * Bilirkişi, Aktüerya ve KoopPlus bilerek listede yok.
+ */
+export const DESKTOP_TRIAL_TEST_IDENTITIES: Readonly<
+  Record<string, { emailNormalized: string; phoneNormalized: string }>
+> = {
+  [APP_CODE_MUVEKKIL_KASA_DESKTOP]: {
+    emailNormalized: 'info@woontegra.com',
+    phoneNormalized: '+905323171755',
+  },
+};
+
+export function getDesktopTrialTestIdentity(appCode: string) {
+  return DESKTOP_TRIAL_TEST_IDENTITIES[appCode] ?? null;
+}
+
+export const TEST_TRIAL_RESET_MARKER = 'TEST_TRIAL_RESET';
+
 export const DEVICE_HASH_SHA256_HEX = /^[a-fA-F0-9]{64}$/;
 
 export const TRIAL_ERROR_CODES = {
