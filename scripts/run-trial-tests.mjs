@@ -67,6 +67,7 @@ async function main() {
     await run('npx', ['tsx', 'scripts/test-bilirkisi-desktop-trial.ts'], extraEnv);
     await run('npx', ['tsx', 'scripts/test-p0-saas.ts'], extraEnv);
     await run('npx', ['tsx', 'scripts/test-aktuerya-license.ts'], extraEnv);
+    await run('npx', ['tsx', 'scripts/test-muvekkil-kasa-platform.ts'], extraEnv);
     await run('npx', ['tsx', 'scripts/test-renew-license.ts'], extraEnv);
   } finally {
     try {

@@ -20,9 +20,9 @@ import {
   DesktopPurchaseError,
   resolveDesktopPurchaseToken,
 } from '../services/desktopPurchaseService';
-import { APP_CODE_BILIRKISI_DESKTOP } from '../constants/desktopTrial';
+import { APP_CODE_BILIRKISI_DESKTOP, APP_CODE_MUVEKKIL_KASA_DESKTOP } from '../constants/desktopTrial';
 import { APP_CODE_AKTUERYA_DESKTOP, normalizeSaasTargetService } from '../constants/aktuerya';
-import { normalizeDesktopEntitlementPlatform } from '../lib/desktopPlatform';
+import { normalizeDesktopEntitlementPlatform, resolveOptionalOrderPlatform } from '../lib/desktopPlatform';
 import { parseProductType, toProgramDto, validateSaasProgramFields } from '../utils/programDto';
 
 const router = Router();
@@ -272,6 +272,15 @@ router.post(
             error: 'BILIRKISI_DESKTOP için platform WINDOWS veya MACOS olmalıdır',
           });
         }
+      }
+      if (isDesktopProgram(program) && program.appCode === APP_CODE_MUVEKKIL_KASA_DESKTOP) {
+        const resolved = resolveOptionalOrderPlatform(req.body?.platform);
+        if (!resolved.ok) {
+          return res.status(400).json({
+            error: 'MUVEKKIL_KASA_DESKTOP için platform gönderilirse WINDOWS veya MACOS olmalıdır',
+          });
+        }
+        desktopPlatform = resolved.platform;
       }
 
       let aktueryaPlan: 'monthly' | 'yearly' | undefined;

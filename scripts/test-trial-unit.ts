@@ -22,7 +22,9 @@ import {
   entitlementPlatformMismatch,
   LicensePlatformRequiredError,
   normalizeDesktopEntitlementPlatform,
+  resolveOptionalOrderPlatform,
   resolvePaidLicensePlatform,
+  validationPlatformMismatch,
 } from '../src/lib/desktopPlatform';
 
 let passed = 0;
@@ -164,6 +166,37 @@ async function main() {
     bhPlatformRejected = error instanceof LicensePlatformRequiredError;
   }
   assert(bhPlatformRejected, 'new BH paid license rejects a missing platform');
+  const winDevice = { platform: 'win32-x64' };
+  const macDevice = { platform: 'darwin-arm64' };
+  const mkValidate = (licensePlatform: string | null, requestPlatform: unknown, device: { platform: string | null } | null) =>
+    validationPlatformMismatch({ appCode: 'MUVEKKIL_KASA_DESKTOP', licensePlatform, requestPlatform, device });
+  assert(mkValidate('WINDOWS', undefined, winDevice) === false, 'MK 0.1.14 Windows validate without platform uses device platform');
+  assert(mkValidate('WINDOWS', '', winDevice) === false, 'MK empty platform falls back to device platform');
+  assert(mkValidate('MACOS', undefined, macDevice) === false, 'MK macOS validate without platform uses device platform');
+  assert(mkValidate('WINDOWS', undefined, macDevice) === true, 'MK Windows license on macOS device still mismatches');
+  assert(mkValidate('WINDOWS', 'darwin-arm64', winDevice) === true, 'MK explicit different platform keeps PLATFORM_MISMATCH');
+  assert(mkValidate('MACOS', 'win32-x64', macDevice) === true, 'MK macOS license rejects explicit Windows');
+  assert(mkValidate('WINDOWS', 'win32-x64', winDevice) === false, 'MK Windows license accepts explicit Windows');
+  assert(mkValidate('WINDOWS', undefined, null) === false, 'MK unknown device is left to the device check');
+  assert(mkValidate(null, undefined, winDevice) === false, 'MK legacy null-platform license stays valid without platform');
+  assert(mkValidate(null, 'darwin', winDevice) === false, 'MK legacy null-platform license stays valid on any platform');
+  assert(
+    validationPlatformMismatch({ appCode: 'BILIRKISI_DESKTOP', licensePlatform: 'WINDOWS', requestPlatform: undefined, device: winDevice }),
+    'BH validate without platform still mismatches (no device fallback)'
+  );
+  assert(
+    validationPlatformMismatch({ appCode: 'AKTUERYA_DESKTOP', licensePlatform: 'MACOS', requestPlatform: undefined, device: macDevice }),
+    'Aktüerya validate without platform still mismatches (no device fallback)'
+  );
+  const optionalNone = resolveOptionalOrderPlatform(undefined);
+  assert(optionalNone.ok && optionalNone.platform === null, 'optional order platform: missing stays null');
+  const optionalBlank = resolveOptionalOrderPlatform('  ');
+  assert(optionalBlank.ok && optionalBlank.platform === null, 'optional order platform: blank stays null');
+  const optionalWin = resolveOptionalOrderPlatform('win32-x64');
+  assert(optionalWin.ok && optionalWin.platform === 'WINDOWS', 'optional order platform: win32 -> WINDOWS');
+  const optionalMac = resolveOptionalOrderPlatform('MACOS');
+  assert(optionalMac.ok && optionalMac.platform === 'MACOS', 'optional order platform: MACOS');
+  assert(!resolveOptionalOrderPlatform('linux').ok, 'optional order platform: unknown value rejected');
   await expectCode(
     () =>
       startDesktopTrial({

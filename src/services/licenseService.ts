@@ -9,7 +9,11 @@ import { generateActivationPassword, generateLicenseKey } from '../utils/license
 import { hashPassword } from '../utils/password';
 import { isLicenseExpired, resolveLicenseStatus } from '../utils/license';
 import { sendLicenseMail } from './mailService';
-import { entitlementPlatformMismatch, resolvePaidLicensePlatform } from '../lib/desktopPlatform';
+import {
+  entitlementPlatformMismatch,
+  resolvePaidLicensePlatform,
+  validationPlatformMismatch,
+} from '../lib/desktopPlatform';
 import { APP_CODE_BILIRKISI_DESKTOP, isSystemTrialLicenseNotes } from '../constants/desktopTrial';
 
 async function createUniqueLicenseKey(): Promise<string> {
@@ -311,11 +315,18 @@ export async function validateLicense(input: ValidateInput) {
     },
   });
 
-  if (entitlementPlatformMismatch(license.platform, input.platform)) {
+  if (
+    validationPlatformMismatch({
+      appCode: license.program.appCode,
+      licensePlatform: license.platform,
+      requestPlatform: input.platform,
+      device,
+    })
+  ) {
     await logLicenseEvent(
       license.id,
       LicenseEventType.VALIDATION_FAILED,
-      `Validate platform uyuşmuyor: ${input.platform ?? ''}`,
+      `Validate platform uyuşmuyor: ${input.platform ?? device?.platform ?? ''}`,
       input.ipAddress
     );
     return {

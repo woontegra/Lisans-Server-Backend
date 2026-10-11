@@ -24,6 +24,32 @@ export function entitlementPlatformMismatch(
   return normalizeDesktopEntitlementPlatform(requestPlatform) !== required;
 }
 
+/** MK Desktop 0.1.14 /validate isteğinde platform göndermez; aktivasyonda cihaza yazılan platform kullanılır. */
+const DEVICE_PLATFORM_FALLBACK_APP_CODES = new Set(['MUVEKKIL_KASA_DESKTOP']);
+
+export function validationPlatformMismatch(input: {
+  appCode: string;
+  licensePlatform: string | null | undefined;
+  requestPlatform: unknown;
+  device: { platform: string | null } | null;
+}): boolean {
+  const requestHasPlatform = typeof input.requestPlatform === 'string' && input.requestPlatform.trim() !== '';
+  if (!requestHasPlatform && DEVICE_PLATFORM_FALLBACK_APP_CODES.has(input.appCode)) {
+    if (!input.device) return false;
+    return entitlementPlatformMismatch(input.licensePlatform, input.device.platform);
+  }
+  return entitlementPlatformMismatch(input.licensePlatform, input.requestPlatform);
+}
+
+/** Platformu henüz zorunlu olmayan sipariş: boşsa null, doluysa WINDOWS/MACOS olmalı. */
+export function resolveOptionalOrderPlatform(
+  raw: unknown
+): { ok: true; platform: DesktopEntitlementPlatform | null } | { ok: false } {
+  if (raw == null || (typeof raw === 'string' && raw.trim() === '')) return { ok: true, platform: null };
+  const platform = normalizeDesktopEntitlementPlatform(raw);
+  return platform ? { ok: true, platform } : { ok: false };
+}
+
 export class LicensePlatformRequiredError extends Error {
   constructor(message: string) {
     super(message);
