@@ -1,5 +1,6 @@
 import nodemailer from 'nodemailer';
 import { config, isSmtpConfigured } from '../config';
+import { normalizeDesktopEntitlementPlatform, type DesktopEntitlementPlatform } from '../lib/desktopPlatform';
 
 export interface LicenseMailData {
   programName: string;
@@ -9,6 +10,49 @@ export interface LicenseMailData {
   activationPassword: string;
   downloadUrl?: string;
   expiresAt: Date;
+  maxDevices?: number;
+  /** License.platform. Doluysa yalnız bu platformun kurulum dosyası bağlantısı maile girer. */
+  platform?: string | null;
+  appCode?: string;
+}
+
+const PLATFORM_LABELS: Record<DesktopEntitlementPlatform, string> = { WINDOWS: 'Windows', MACOS: 'macOS' };
+const INSTALLER_EXTENSIONS: Record<DesktopEntitlementPlatform, string[]> = {
+  WINDOWS: ['.exe', '.msi'],
+  MACOS: ['.dmg', '.pkg'],
+};
+
+/** Platformlu lisansta güncelleme beslemesi veya diğer platformun kurulum dosyası müşteriye gönderilmez. */
+export function resolveMailDownloadUrl(downloadUrl: string | undefined, platform: string | null | undefined) {
+  const raw = downloadUrl?.trim();
+  if (!raw) return undefined;
+  const required = normalizeDesktopEntitlementPlatform(platform);
+  if (!required) return raw;
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return undefined;
+  }
+  if (parsed.protocol !== 'https:') return undefined;
+  const host = parsed.hostname.toLowerCase();
+  const path = decodeURIComponent(parsed.pathname).toLowerCase();
+  if (host === 'updates.woontegra.com' || host.endsWith('.updates.woontegra.com') || path.includes('/updates/')) {
+    return undefined;
+  }
+  return INSTALLER_EXTENSIONS[required].some((ext) => path.endsWith(ext)) ? raw : undefined;
+}
+
+/** MK Desktop'ta platformlu lisansa ortam değişkenindeki kurulum adresi verilir; yoksa gelen bağlantı kullanılır. */
+export function licenseMailDownloadUrl(input: {
+  appCode?: string;
+  platform?: string | null;
+  downloadUrl?: string;
+}): string | undefined {
+  const platform = normalizeDesktopEntitlementPlatform(input.platform);
+  const configured =
+    input.appCode === 'MUVEKKIL_KASA_DESKTOP' && platform ? config.muvekkilKasaDownloadUrls[platform] : '';
+  return resolveMailDownloadUrl(configured || input.downloadUrl, input.platform);
 }
 
 export async function sendDesktopAuthCode(input: {
@@ -59,9 +103,15 @@ export async function sendLicenseMail(
     },
   });
 
-  const downloadSection = data.downloadUrl
-    ? `\nİndirme Bağlantısı: ${data.downloadUrl}\n`
-    : '';
+  const downloadUrl = licenseMailDownloadUrl(data);
+  const downloadSection = downloadUrl ? `\nİndirme Bağlantısı: ${downloadUrl}\n` : '';
+  const platform = normalizeDesktopEntitlementPlatform(data.platform);
+  const platformLabel = platform ? PLATFORM_LABELS[platform] : undefined;
+  const htmlRow = (label: string, value: string) => `
+        <tr>
+          <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">${label}</td>
+          <td style="padding: 8px; border: 1px solid #ddd;">${value}</td>
+        </tr>`;
 
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -84,9 +134,9 @@ export async function sendLicenseMail(
         <tr>
           <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Bitiş Tarihi</td>
           <td style="padding: 8px; border: 1px solid #ddd;">${data.expiresAt.toLocaleDateString('tr-TR')}</td>
-        </tr>
+        </tr>${data.maxDevices ? htmlRow('Cihaz Hakkı', String(data.maxDevices)) : ''}${platformLabel ? htmlRow('İşletim Sistemi', platformLabel) : ''}
       </table>
-      ${data.downloadUrl ? `<p><strong>İndirme Bağlantısı:</strong> <a href="${data.downloadUrl}">${data.downloadUrl}</a></p>` : ''}
+      ${downloadUrl ? `<p><strong>İndirme Bağlantısı:</strong> <a href="${downloadUrl}">${downloadUrl}</a></p>` : ''}
       <h3>Kurulum</h3>
       <ol>
         <li>Programı indirin ve kurun.</li>
@@ -111,7 +161,7 @@ ${data.programName} programınız için lisans bilgileriniz:
 Program: ${data.programName}
 Lisans Anahtarı: ${data.licenseKey}
 Aktivasyon Şifresi: ${data.activationPassword}
-Bitiş Tarihi: ${data.expiresAt.toLocaleDateString('tr-TR')}
+Bitiş Tarihi: ${data.expiresAt.toLocaleDateString('tr-TR')}${data.maxDevices ? `\nCihaz Hakkı: ${data.maxDevices}` : ''}${platformLabel ? `\nİşletim Sistemi: ${platformLabel}` : ''}
 ${downloadSection}
 Kurulum:
 1. Programı indirin ve kurun.

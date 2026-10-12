@@ -24,6 +24,11 @@ export const config = {
     from: process.env.MAIL_FROM || 'noreply@woontegra.com',
   },
   offlineGraceDays: 7,
+  /** Müvekkil Kasa Desktop public kurulum dosyaları (updater ZIP / latest.yml değil). */
+  muvekkilKasaDownloadUrls: {
+    WINDOWS: process.env.MUVEKKIL_KASA_WINDOWS_DOWNLOAD_URL?.trim() || '',
+    MACOS: process.env.MUVEKKIL_KASA_MACOS_DOWNLOAD_URL?.trim() || '',
+  },
 };
 
 export {

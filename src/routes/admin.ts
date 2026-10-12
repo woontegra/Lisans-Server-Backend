@@ -448,6 +448,10 @@ router.post('/licenses/:id/send-mail', authMiddleware, async (req: Request, res:
       });
     }
 
+    if (!(await verifyPassword(String(activationPassword), license.activationPasswordHash))) {
+      return res.status(400).json({ error: 'Aktivasyon şifresi bu lisansla eşleşmiyor. Mail gönderilmedi.' });
+    }
+
     const mailResult = await sendLicenseMail({
       programName: license.program.name,
       customerEmail: license.customer.email,
@@ -456,6 +460,9 @@ router.post('/licenses/:id/send-mail', authMiddleware, async (req: Request, res:
       activationPassword,
       downloadUrl,
       expiresAt: license.expiresAt,
+      maxDevices: license.maxDevices,
+      platform: license.platform,
+      appCode: license.program.appCode,
     });
 
     await logLicenseEvent(

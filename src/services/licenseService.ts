@@ -117,6 +117,9 @@ export async function createLicense(input: CreateLicenseInput): Promise<CreateLi
       activationPassword,
       downloadUrl: input.downloadUrl,
       expiresAt,
+      maxDevices: license.maxDevices,
+      platform: license.platform,
+      appCode: program.appCode,
     });
     await logLicenseEvent(
       license.id,

@@ -178,6 +178,45 @@ async function main() {
   const mkInvalidRow = await prisma.license.findFirst({ where: { notes: `Website sipariş no: ${mkInvalid.orderNo}` } });
   assert(!mkInvalidRow, 'MK rejected order does not create a license');
 
+  // Admin panelinden manuel MK lisansı: seçilen işletim sistemi kayda ve detaya aktarılır
+  const programs = await json('GET', '/api/admin/programs', undefined, auth);
+  const mkProgram = (programs.data as Array<{ id: string; appCode: string }>).find((p) => p.appCode === MK);
+  for (const platform of ['WINDOWS', 'MACOS'] as const) {
+    const adminCreated = await json(
+      'POST',
+      '/api/admin/licenses',
+      {
+        newCustomer: { name: 'MK Admin Platform Test', email: `mk-admin-${platform}-${stamp}@example.invalid` },
+        programId: mkProgram?.id,
+        licenseDays: 365,
+        maxDevices: 1,
+        platform,
+        notes: `${ORDER_PREFIX}admin-${platform}-${stamp}`,
+        sendMail: false,
+      },
+      auth
+    );
+    assert(
+      adminCreated.status === 201 && adminCreated.data.license?.platform === platform,
+      `MK admin create stores ${platform}`,
+      JSON.stringify(adminCreated.data)
+    );
+    const detail = await json('GET', `/api/admin/licenses/${adminCreated.data.license?.id}`, undefined, auth);
+    assert(detail.status === 200 && detail.data.platform === platform, `MK admin license detail shows ${platform}`);
+    const adminDevice = `mk-admin-${platform}-${stamp}`;
+    const adminAct = await json('POST', '/api/public/license/activate', {
+      licenseKey: adminCreated.data.license?.licenseKey,
+      activationPassword: adminCreated.data.activationPassword,
+      appCode: MK,
+      deviceHash: adminDevice,
+      deviceName: 'test-device',
+      platform: platform === 'WINDOWS' ? 'win32-x64' : 'darwin-arm64',
+    });
+    assert(adminAct.data.success === true, `MK admin ${platform} license activates on matching OS`);
+    const adminValidate = await validate(MK, adminCreated.data.license?.licenseKey, adminDevice);
+    assert(adminValidate.data.valid === true, `MK admin ${platform} license valid for 0.1.14 client without platform`);
+  }
+
   // BH ve Aktüerya regresyonu: platform zorunlu, cihaz yedeği yok
   const bhMissing = await order('BILIRKISI_DESKTOP');
   assert(bhMissing.status === 400, 'BILIRKISI_DESKTOP order without platform still rejected');

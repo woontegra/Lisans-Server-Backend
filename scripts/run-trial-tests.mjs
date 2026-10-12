@@ -70,6 +70,7 @@ async function main() {
     await run('npx', ['tsx', 'scripts/test-muvekkil-kasa-platform.ts'], extraEnv);
     await run('npx', ['tsx', 'scripts/test-desktop-trial-test-reset.ts'], extraEnv);
     await run('npx', ['tsx', 'scripts/test-renew-license.ts'], extraEnv);
+    await run('npx', ['tsx', 'scripts/test-admin-license-mail.ts'], extraEnv);
   } finally {
     try {
       await pg.stop();

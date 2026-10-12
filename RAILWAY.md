@@ -74,6 +74,17 @@ Seed her deploy’da otomatik çalışır; admin ve programlar upsert ile idempo
 
 SMTP (isteğe bağlı): `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM`
 
+Müvekkil Kasa Desktop lisans mailindeki kurulum bağlantıları (isteğe bağlı; boşsa mailde bağlantı olmaz):
+`MUVEKKIL_KASA_WINDOWS_DOWNLOAD_URL` (`.exe`), `MUVEKKIL_KASA_MACOS_DOWNLOAD_URL` (`.dmg`).
+Yalnız `download.woontegra.com/downloads/...` yolundaki imzalı kurulum dosyası girilmeli; `updates/` yolu, updater ZIP veya `latest.yml` kabul edilmez.
+
+| Değişken | Değer (12.10.2026 doğrulandı) |
+|----------|--------|
+| `MUVEKKIL_KASA_WINDOWS_DOWNLOAD_URL` | `https://download.woontegra.com/downloads/muvekkil-kasa/windows/Woontegra-Muvekkil-Kasa-Defteri-Setup-0.1.14.exe` |
+| `MUVEKKIL_KASA_MACOS_DOWNLOAD_URL` | `https://download.woontegra.com/downloads/muvekkil-kasa/macos/Woontegra-Muvekkil-Kasa-Defteri-0.1.16-mac-arm64.dmg` |
+
+Yeni kurulum sürümü `downloads/` yoluna yüklendiğinde ilgili değişken o adresle güncellenmelidir.
+
 Deploy sonrası test:
 ```
 https://lisans-server-backend-production.up.railway.app/health
