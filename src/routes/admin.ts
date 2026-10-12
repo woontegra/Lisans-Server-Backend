@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { LicenseSource, LicenseStatus, ProgramProductType } from '@prisma/client';
 import { prisma } from '../lib/prisma';
@@ -23,6 +23,12 @@ import { paramId } from '../utils/params';
 import { parseProductType, validateSaasProgramFields } from '../utils/programDto';
 import { normalizeSaasTargetService } from '../constants/aktuerya';
 import { LicensePlatformRequiredError } from '../lib/desktopPlatform';
+import {
+  getLicenseDeletionBlockers,
+  LICENSE_DELETION_BLOCKER_MESSAGES,
+  LicenseDeletionError,
+  softDeleteLicense,
+} from '../services/licenseDeletion';
 
 const router = Router();
 
@@ -65,8 +71,21 @@ router.get('/me', authMiddleware, async (req: Request, res: Response) => {
     select: { id: true, email: true, name: true },
   });
   if (!admin) return res.status(404).json({ error: 'Admin bulunamadı' });
-  return res.json(admin);
+  return res.json({ ...admin, isSuperAdmin: config.superAdminEmails.includes(admin.email.trim().toLowerCase()) });
 });
+
+async function rejectDeletedLicense(req: Request, res: Response, next: NextFunction) {
+  try {
+    const license = await prisma.license.findUnique({ where: { id: paramId(req) }, select: { deletedAt: true } });
+    if (license?.deletedAt) {
+      return res.status(409).json({ code: 'LICENSE_DELETED', error: 'Silinmiş lisans üzerinde işlem yapılamaz' });
+    }
+    return next();
+  } catch (err) {
+    console.error('Deleted license check error:', err);
+    return res.status(500).json({ error: 'Sunucu hatası' });
+  }
+}
 
 router.get('/programs', authMiddleware, async (_req: Request, res: Response) => {
   const programs = await prisma.program.findMany({ orderBy: { name: 'asc' } });
@@ -161,12 +180,13 @@ router.get('/dashboard', authMiddleware, async (_req: Request, res: Response) =>
   in30Days.setDate(in30Days.getDate() + 30);
 
   const [total, active, expired, expiringSoon, byProgram] = await Promise.all([
-    prisma.license.count(),
+    prisma.license.count({ where: { deletedAt: null } }),
     prisma.license.count({
-      where: { status: LicenseStatus.ACTIVE, expiresAt: { gt: now } },
+      where: { deletedAt: null, status: LicenseStatus.ACTIVE, expiresAt: { gt: now } },
     }),
     prisma.license.count({
       where: {
+        deletedAt: null,
         OR: [
           { status: LicenseStatus.EXPIRED },
           { expiresAt: { lte: now }, status: { not: LicenseStatus.PASSIVE } },
@@ -175,12 +195,14 @@ router.get('/dashboard', authMiddleware, async (_req: Request, res: Response) =>
     }),
     prisma.license.count({
       where: {
+        deletedAt: null,
         status: LicenseStatus.ACTIVE,
         expiresAt: { gt: now, lte: in30Days },
       },
     }),
     prisma.license.groupBy({
       by: ['programId'],
+      where: { deletedAt: null },
       _count: { id: true },
     }),
   ]);
@@ -209,6 +231,7 @@ router.get('/licenses', authMiddleware, async (req: Request, res: Response) => {
 
   const licenses = await prisma.license.findMany({
     where: {
+      deletedAt: null,
       ...(programId ? { programId } : {}),
       ...(status ? { status } : {}),
       ...(search
@@ -253,9 +276,12 @@ router.get('/licenses/:id', authMiddleware, async (req: Request, res: Response) 
 
   if (!license) return res.status(404).json({ error: 'Lisans bulunamadı' });
 
+  const deletionBlockers = license.deletedAt ? [] : await getLicenseDeletionBlockers(prisma, license.id);
+
   return res.json({
     ...license,
     activationPasswordHash: undefined,
+    deletionBlockers: deletionBlockers.map((code) => ({ code, message: LICENSE_DELETION_BLOCKER_MESSAGES[code] })),
     effectiveStatus: resolveLicenseStatus(license.status, license.expiresAt),
     activeDeviceCount: license.devices.filter((d) => d.status === 'ACTIVE').length,
     daysUntilExpiry: daysUntilExpiry(license.expiresAt),
@@ -273,7 +299,6 @@ router.post('/licenses', authMiddleware, async (req: Request, res: Response) => 
       licenseDays,
       maxDevices,
       notes,
-      sendMail,
       downloadUrl,
       platform,
     } = req.body;
@@ -306,7 +331,7 @@ router.post('/licenses', authMiddleware, async (req: Request, res: Response) => 
       maxDevices,
       notes,
       platform,
-      sendMail: !!sendMail,
+      sendMail: true,
       downloadUrl,
       ipAddress: getClientIp(req),
     });
@@ -328,7 +353,7 @@ router.post('/licenses', authMiddleware, async (req: Request, res: Response) => 
   }
 });
 
-router.patch('/licenses/:id', authMiddleware, async (req: Request, res: Response) => {
+router.patch('/licenses/:id', authMiddleware, rejectDeletedLicense, async (req: Request, res: Response) => {
   try {
     const { maxDevices, notes, expiresAt, status } = req.body;
     const license = await prisma.license.update({
@@ -348,7 +373,7 @@ router.patch('/licenses/:id', authMiddleware, async (req: Request, res: Response
   }
 });
 
-router.post('/licenses/:id/extend', authMiddleware, async (req: Request, res: Response) => {
+router.post('/licenses/:id/extend', authMiddleware, rejectDeletedLicense, async (req: Request, res: Response) => {
   try {
     const { days } = req.body;
     if (!days || days < 1) {
@@ -362,7 +387,7 @@ router.post('/licenses/:id/extend', authMiddleware, async (req: Request, res: Re
   }
 });
 
-router.post('/licenses/:id/enable', authMiddleware, async (req: Request, res: Response) => {
+router.post('/licenses/:id/enable', authMiddleware, rejectDeletedLicense, async (req: Request, res: Response) => {
   try {
     const license = await prisma.license.update({
       where: { id: paramId(req) },
@@ -381,7 +406,7 @@ router.post('/licenses/:id/enable', authMiddleware, async (req: Request, res: Re
   }
 });
 
-router.post('/licenses/:id/disable', authMiddleware, async (req: Request, res: Response) => {
+router.post('/licenses/:id/disable', authMiddleware, rejectDeletedLicense, async (req: Request, res: Response) => {
   try {
     const license = await prisma.license.update({
       where: { id: paramId(req) },
@@ -400,7 +425,7 @@ router.post('/licenses/:id/disable', authMiddleware, async (req: Request, res: R
   }
 });
 
-router.post('/licenses/:id/reset-devices', authMiddleware, async (req: Request, res: Response) => {
+router.post('/licenses/:id/reset-devices', authMiddleware, rejectDeletedLicense, async (req: Request, res: Response) => {
   try {
     await resetDevices(paramId(req), getClientIp(req));
     const license = await prisma.license.findUnique({
@@ -416,6 +441,7 @@ router.post('/licenses/:id/reset-devices', authMiddleware, async (req: Request, 
 router.post(
   '/licenses/:id/regenerate-password',
   authMiddleware,
+  rejectDeletedLicense,
   async (req: Request, res: Response) => {
     try {
       const activationPassword = await regenerateActivationPassword(
@@ -432,7 +458,7 @@ router.post(
   }
 );
 
-router.post('/licenses/:id/send-mail', authMiddleware, async (req: Request, res: Response) => {
+router.post('/licenses/:id/send-mail', authMiddleware, rejectDeletedLicense, async (req: Request, res: Response) => {
   try {
     const { activationPassword, downloadUrl } = req.body;
     const license = await prisma.license.findUnique({
@@ -475,6 +501,24 @@ router.post('/licenses/:id/send-mail', authMiddleware, async (req: Request, res:
     return res.json(mailResult);
   } catch (err) {
     return res.status(500).json({ error: 'Mail gönderilemedi' });
+  }
+});
+
+router.delete('/licenses/:id', authMiddleware, superAdminMiddleware, async (req: Request, res: Response) => {
+  try {
+    const result = await softDeleteLicense({
+      licenseId: paramId(req),
+      confirmLicenseKey: req.body?.confirmLicenseKey,
+      adminEmail: req.admin!.email,
+      ipAddress: getClientIp(req),
+    });
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    if (err instanceof LicenseDeletionError) {
+      return res.status(err.httpStatus).json({ code: err.code, error: err.message, blockers: err.blockers });
+    }
+    console.error('Delete license error:', err);
+    return res.status(500).json({ error: 'Lisans silinemedi' });
   }
 });
 

@@ -20,13 +20,27 @@ const MAC_URL = 'https://download.example.test/muvekkil-kasa/macos/Woontegra-Muv
 
 type SentMail = { to?: unknown; subject?: unknown; text?: string; html?: string };
 const sent: SentMail[] = [];
+let smtpMode: 'ok' | 'reject' | 'transport-throws' = 'ok';
 const transportFactory = nodemailer as unknown as { createTransport: (...args: unknown[]) => unknown };
-transportFactory.createTransport = () => ({
-  sendMail: async (mail: SentMail) => {
-    sent.push(mail);
-    return { messageId: `mock-${sent.length}` };
-  },
-});
+transportFactory.createTransport = () => {
+  if (smtpMode === 'transport-throws') throw new Error('Mock transport init failure');
+  return {
+    sendMail: async (mail: SentMail) => {
+      if (smtpMode === 'reject') throw new Error('Mock SMTP 550 recipient rejected');
+      sent.push(mail);
+      return { messageId: `mock-${sent.length}` };
+    },
+  };
+};
+
+const capturedLogs: string[] = [];
+for (const level of ['log', 'info', 'warn', 'error'] as const) {
+  const original = console[level].bind(console);
+  console[level] = (...args: unknown[]) => {
+    capturedLogs.push(args.map((a) => (a instanceof Error ? `${a.message} ${a.stack}` : String(a))).join(' '));
+    original(...args);
+  };
+}
 
 const prisma = new PrismaClient();
 let passed = 0;
@@ -125,16 +139,20 @@ async function main() {
     ).then((res) => ({ ...res, email }));
   };
 
-  console.log('-- sendMail kapalı');
+  console.log('-- Manuel oluşturma her zaman mail gönderir');
   const before = sent.length;
-  const silent = await create(mkProgram.id, { platform: 'WINDOWS', sendMail: false, downloadUrl: WIN_URL });
-  assert(silent.status === 201, 'MK license created without mail');
-  assert(sent.length === before, 'unchecked "Mail gönder" sends no mail');
-  assert(silent.data.mailResult === undefined, 'no mailResult when mail is off');
-  const silentEvents = await prisma.licenseEvent.count({
-    where: { licenseId: silent.data.license.id, eventType: 'MAIL_SENT' },
+  const legacyFlag = await create(mkProgram.id, { platform: 'WINDOWS', sendMail: false, downloadUrl: WIN_URL });
+  assert(legacyFlag.status === 201, 'MK license created');
+  assert(sent.length === before + 1 && sent[sent.length - 1].to === legacyFlag.email, 'mail sent even if client sends sendMail:false');
+  assert(legacyFlag.data.mailResult?.sent === true, 'mailResult.sent true without any flag');
+  const legacyEvents = await prisma.licenseEvent.findMany({
+    where: { licenseId: legacyFlag.data.license.id, eventType: 'MAIL_SENT' },
   });
-  assert(silentEvents === 0, 'no MAIL_SENT event when mail is off');
+  assert(legacyEvents.length === 1 && legacyEvents[0].message === 'Lisans maili gönderildi', 'MAIL_SENT success event logged');
+  assert(
+    capturedLogs.some((l) => l.includes(`[license-mail] licenseId=${legacyFlag.data.license.id} sent=true`)),
+    'mail result logged with license id'
+  );
 
   console.log('-- MK Windows, mail açık');
   const win = await create(mkProgram.id, { platform: 'WINDOWS', sendMail: true, downloadUrl: WIN_URL });
@@ -263,6 +281,62 @@ async function main() {
   assert(!lastMail().text?.includes('İndirme Bağlantısı'), 'missing macOS config yields no link for macOS license');
   config.muvekkilKasaDownloadUrls.WINDOWS = '';
 
+  console.log('-- SMTP gönderimi başarısız');
+  const failedMailPasswords: string[] = [];
+  for (const mode of ['reject', 'transport-throws'] as const) {
+    smtpMode = mode;
+    const beforeFail = sent.length;
+    const licenseCountBefore = await prisma.license.count();
+    const fail = await create(mkProgram.id, { platform: 'WINDOWS' });
+    smtpMode = 'ok';
+    failedMailPasswords.push(fail.data.activationPassword);
+    assert(fail.status === 201 && !!fail.data.license?.id && !!fail.data.activationPassword, `${mode}: license still created (201)`);
+    assert(fail.data.mailResult?.sent === false && !!fail.data.mailResult?.error, `${mode}: mailResult reports failure`, JSON.stringify(fail.data.mailResult));
+    assert(sent.length === beforeFail, `${mode}: nothing delivered`);
+    assert((await prisma.license.count()) === licenseCountBefore + 1, `${mode}: exactly one license row, no duplicate`);
+    const failEvents = await prisma.licenseEvent.findMany({
+      where: { licenseId: fail.data.license.id, eventType: 'MAIL_SENT' },
+    });
+    assert(
+      failEvents.length === 1 && !!failEvents[0].message && failEvents[0].message.includes('Mock'),
+      `${mode}: MAIL_SENT failure event logged`
+    );
+    assert(
+      capturedLogs.some((l) => l.includes(`[license-mail] licenseId=${fail.data.license.id} sent=false`)),
+      `${mode}: failure logged with license id`
+    );
+    const resendAfterFail = await json(
+      'POST',
+      `/api/admin/licenses/${fail.data.license.id}/send-mail`,
+      { activationPassword: fail.data.activationPassword },
+      auth
+    );
+    assert(resendAfterFail.status === 200 && resendAfterFail.data.sent === true, `${mode}: resend from detail works after failure`);
+  }
+
+  console.log('-- Otomatik akışlar değişmedi');
+  const beforeOrder = sent.length;
+  const order = await json(
+    'POST',
+    '/api/integrations/website/order-license',
+    {
+      customerName: 'Order Mail Test',
+      customerEmail: `admin-mail-${stamp}-order@example.invalid`,
+      appCode: MK,
+      orderNo: `${NOTE_PREFIX}ORDER-${stamp}`,
+      licenseDays: 365,
+      platform: 'WINDOWS',
+    },
+    { 'x-integration-secret': process.env.INTEGRATION_SECRET || 'change-me-integration-secret' }
+  );
+  assert(order.status === 201, 'website order license created');
+  assert(sent.length === beforeOrder, 'website order flow sends no license mail');
+  const orderLicense = await prisma.license.findUnique({ where: { licenseKey: order.data.licenseKey } });
+  assert(
+    (await prisma.licenseEvent.count({ where: { licenseId: orderLicense!.id, eventType: 'MAIL_SENT' } })) === 0,
+    'website order flow logs no MAIL_SENT'
+  );
+
   console.log('-- SMTP yapılandırılmamış');
   config.smtp.host = '';
   const beforeNoSmtp = sent.length;
@@ -271,7 +345,15 @@ async function main() {
   assert(noSmtp.data.mailResult?.sent === false && !!noSmtp.data.mailResult?.error, 'mailResult reports SMTP error');
   assert(sent.length === beforeNoSmtp, 'nothing mailed when SMTP missing');
 
-  const created = await prisma.license.findMany({ where: { notes: { startsWith: NOTE_PREFIX } }, select: { id: true } });
+  const created = await prisma.license.findMany({ where: { notes: { contains: NOTE_PREFIX } }, select: { id: true } });
+  const issuedPasswords = [legacyFlag, win, mac, noLink, other, cfgWin, cfgMac, noSmtp]
+    .map((r) => r.data.activationPassword as string)
+    .concat(failedMailPasswords)
+    .filter(Boolean);
+  assert(
+    issuedPasswords.length > 0 && !capturedLogs.some((l) => issuedPasswords.some((pw) => l.includes(pw))),
+    'activation passwords never appear in logs'
+  );
   const ids = created.map((row) => row.id);
   await prisma.licenseEvent.deleteMany({ where: { licenseId: { in: ids } } });
   await prisma.licenseDevice.deleteMany({ where: { licenseId: { in: ids } } });

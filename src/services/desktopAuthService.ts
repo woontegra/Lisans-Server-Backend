@@ -53,7 +53,9 @@ export async function attachDemoAccountToPaidLicense(
     where: { id: licenseId },
     include: { customer: true, desktopAppUser: true },
   });
-  if (!license || isSystemTrialLicenseNotes(license.notes) || license.desktopAppUser) return license?.desktopAppUser ?? null;
+  if (!license || license.deletedAt || isSystemTrialLicenseNotes(license.notes) || license.desktopAppUser) {
+    return license?.desktopAppUser ?? null;
+  }
   if (license.customer.email.trim().toLowerCase() !== emailNormalized) return null;
   const grant = await prisma.desktopTrialGrant.findFirst({
     where: { deviceHash, emailNormalized, desktopAppUser: { isNot: null } },
@@ -74,6 +76,7 @@ async function activePaidLicenseForDemo(deviceHash: string, emailNormalized: str
       status: 'ACTIVE',
       license: {
         status: LicenseStatus.ACTIVE,
+        deletedAt: null,
         expiresAt: { gt: new Date() },
         customer: { email: { equals: emailNormalized, mode: 'insensitive' } },
       },
@@ -110,7 +113,7 @@ async function paidLicense(licenseKeyRaw: unknown, deviceHashRaw: unknown, appCo
     where: { licenseKey },
     include: { customer: true, program: true },
   });
-  if (!license || license.program.appCode !== appCode) {
+  if (!license || license.deletedAt || license.program.appCode !== appCode) {
     throw new DesktopAuthError(404, 'Lisans bulunamadı', 'LICENSE');
   }
   const device = await prisma.licenseDevice.findUnique({

@@ -109,24 +109,36 @@ export async function createLicense(input: CreateLicenseInput): Promise<CreateLi
 
   let mailResult: { sent: boolean; error?: string } | undefined;
   if (input.sendMail) {
-    mailResult = await sendLicenseMail({
-      programName: program.name,
-      customerEmail: customer.email,
-      customerName: customer.name,
-      licenseKey,
-      activationPassword,
-      downloadUrl: input.downloadUrl,
-      expiresAt,
-      maxDevices: license.maxDevices,
-      platform: license.platform,
-      appCode: program.appCode,
-    });
-    await logLicenseEvent(
-      license.id,
-      LicenseEventType.MAIL_SENT,
-      mailResult.sent ? 'Lisans maili gönderildi' : mailResult.error,
-      input.ipAddress
+    // Lisans kaydı oluştu; mail adımındaki hiçbir hata oluşturma isteğini başarısız yapmamalı.
+    try {
+      mailResult = await sendLicenseMail({
+        programName: program.name,
+        customerEmail: customer.email,
+        customerName: customer.name,
+        licenseKey,
+        activationPassword,
+        downloadUrl: input.downloadUrl,
+        expiresAt,
+        maxDevices: license.maxDevices,
+        platform: license.platform,
+        appCode: program.appCode,
+      });
+    } catch (err) {
+      mailResult = { sent: false, error: err instanceof Error ? err.message : 'Bilinmeyen mail hatası' };
+    }
+    console.info(
+      `[license-mail] licenseId=${license.id} sent=${mailResult.sent}${mailResult.sent ? '' : ` error=${mailResult.error ?? ''}`}`
     );
+    try {
+      await logLicenseEvent(
+        license.id,
+        LicenseEventType.MAIL_SENT,
+        mailResult.sent ? 'Lisans maili gönderildi' : mailResult.error ?? 'Lisans maili gönderilemedi',
+        input.ipAddress
+      );
+    } catch (err) {
+      console.error(`[license-mail] licenseId=${license.id} MAIL_SENT event could not be logged`, err);
+    }
   }
 
   return { license, activationPassword, mailResult };
@@ -151,6 +163,11 @@ export async function activateLicense(input: ActivateInput) {
 
   if (!license) {
     return { success: false, message: 'Lisans bulunamadı' };
+  }
+
+  if (license.deletedAt) {
+    await logLicenseEvent(license.id, LicenseEventType.VALIDATION_FAILED, 'Silinmiş lisans ile aktivasyon denemesi', input.ipAddress);
+    return { success: false, code: 'LICENSE_DELETED', message: 'Bu lisans iptal edilmiştir' };
   }
 
   if (license.program.appCode !== input.appCode) {
@@ -292,6 +309,11 @@ export async function validateLicense(input: ValidateInput) {
       valid: false,
       message: 'Lisans bulunamadı',
     };
+  }
+
+  if (license.deletedAt) {
+    await logLicenseEvent(license.id, LicenseEventType.VALIDATION_FAILED, 'Silinmiş lisans ile doğrulama denemesi', input.ipAddress);
+    return { valid: false, code: 'LICENSE_DELETED', message: 'Bu lisans iptal edilmiştir' };
   }
 
   if (license.program.appCode !== input.appCode) {

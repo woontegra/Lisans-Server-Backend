@@ -122,7 +122,7 @@ export async function renewWebsiteLicense(
     licenseKey: licenseKeyNorm,
     licenseId: input.licenseId,
   });
-  if (!license) {
+  if (!license || license.deletedAt) {
     throw new WebsiteRenewalError('Lisans bulunamadı', 'LICENSE_NOT_FOUND', 404);
   }
   if (license.licenseKey !== licenseKeyNorm) {
@@ -252,7 +252,7 @@ export async function openDesktopRenewal(
     where: { licenseKey },
     include: { program: true, customer: true },
   });
-  if (!license) {
+  if (!license || license.deletedAt) {
     throw new WebsiteRenewalError('Lisans bulunamadı', 'LICENSE_NOT_FOUND', 404);
   }
   if (license.program.appCode !== appCode) {

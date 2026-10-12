@@ -55,6 +55,9 @@ async function main() {
     ADMIN_PASSWORD: 'change-me-strong-password',
     INTEGRATION_SECRET: process.env.INTEGRATION_SECRET || 'change-me-integration-secret',
     TRIAL_RATE_LIMIT_MAX: '500',
+    SMTP_HOST: '',
+    SMTP_USER: '',
+    SMTP_PASS: '',
   };
 
   console.log(`Starting ephemeral Postgres on 127.0.0.1:${PORT}`);
@@ -71,6 +74,7 @@ async function main() {
     await run('npx', ['tsx', 'scripts/test-desktop-trial-test-reset.ts'], extraEnv);
     await run('npx', ['tsx', 'scripts/test-renew-license.ts'], extraEnv);
     await run('npx', ['tsx', 'scripts/test-admin-license-mail.ts'], extraEnv);
+    await run('npx', ['tsx', 'scripts/test-license-delete.ts'], extraEnv);
   } finally {
     try {
       await pg.stop();

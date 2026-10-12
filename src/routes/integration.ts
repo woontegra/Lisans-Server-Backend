@@ -187,7 +187,7 @@ router.get('/customer-licenses', integrationAuthMiddleware, async (req: Request,
     }
 
     const licenses = await prisma.license.findMany({
-      where: { customerId: customer.id },
+      where: { customerId: customer.id, deletedAt: null },
       include: { program: { select: { appCode: true, name: true } } },
       orderBy: { createdAt: 'desc' },
     });

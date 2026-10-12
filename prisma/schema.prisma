@@ -111,6 +111,9 @@ model License {
   notes                  String?
   /// BILIRKISI_DESKTOP için WINDOWS veya MACOS. Diğer ürünlerde null kalır.
   platform               String?
+  /// Soft-delete: doluysa lisans listelerden çıkar, aktivasyon/doğrulama reddedilir; olay geçmişi korunur.
+  deletedAt              DateTime?
+  deletedByEmail         String?
   createdAt              DateTime        @default(now())
   updatedAt              DateTime        @updatedAt
   customer               Customer        @relation(fields: [customerId], references: [id])
@@ -126,6 +129,7 @@ model License {
   @@index([programId])
   @@index([status])
   @@index([expiresAt])
+  @@index([deletedAt])
 }
 
 enum DeviceStatus {
@@ -162,6 +166,7 @@ enum LicenseEventType {
   PASSWORD_REGENERATED
   MAIL_SENT
   VALIDATION_FAILED
+  LICENSE_DELETED
 }
 
 model LicenseEvent {
